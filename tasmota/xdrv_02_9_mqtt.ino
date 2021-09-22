@@ -466,6 +466,16 @@ void MqttUnsubscribeLib(const char *topic) {
   MqttClient.loop();  // Solve LmacRxBlk:1 messages
 }
 
+/**
+ * @brief This Method publishes a MQTT Message via the Ardoino Lib
+ * 
+ * @param topic 
+ * @param payload 
+ * @param plength 
+ * @param retained 
+ * @return true 
+ * @return false 
+ */
 bool MqttPublishLib(const char* topic, const uint8_t* payload, unsigned int plength, bool retained) {
   // If Prefix1 equals Prefix2 disable next MQTT subscription to prevent loop
   if (!strcmp(SettingsText(SET_MQTTPREFIX1), SettingsText(SET_MQTTPREFIX2))) {
@@ -615,6 +625,14 @@ void MqttPublishLoggingAsync(bool refresh) {
   }
 }
 
+/**
+ * @brief Publish a MQTT Message with full control.
+ * 
+ * @param topic 
+ * @param payload 
+ * @param binary_length if `0` the correct lenght will be calculated
+ * @param retained 
+ */
 void MqttPublishPayload(const char* topic, const char* payload, uint32_t binary_length, bool retained) {
   // Publish <topic> payload string or binary when binary_length set with optional retained
 
@@ -664,32 +682,55 @@ void MqttPublishPayload(const char* topic, const char* payload, uint32_t binary_
   }
 }
 
+/**
+ * @brief Publish a MQTT Message to a Topic. The {payload} length will be calculated seperatly. retained is defaulted to false
+ * 
+ * @param topic Topic to publish to
+ * @param payload The Payload to publish
+ */
 void MqttPublishPayload(const char* topic, const char* payload) {
   // Publish <topic> payload string no retained
   MqttPublishPayload(topic, payload, 0, false);
 }
 
+/**
+ * @brief Publish data to a MQTT Topic using the `TasmotaGlobal.mqtt_data` buffer as the payload.
+ * 
+ * @param topic 
+ * @param retained 
+ */
 void MqttPublish(const char* topic, bool retained) {
   // Publish <topic> default ResponseData string with optional retained
   MqttPublishPayload(topic, ResponseData(), 0, retained);
 }
 
+/**
+ * @brief Publish data to a MQTT Topic using the `TasmotaGlobal.mqtt_data` buffer as the payload. `retained` is false
+ * 
+ * @param topic 
+ */
 void MqttPublish(const char* topic) {
   // Publish <topic> default ResponseData string no retained
   MqttPublish(topic, false);
 }
 
+/**
+ * @brief   Publish <prefix>/<device>/<RESULT or <subtopic>> payload string or binary when binary_length set with optional retained
+ * 
+ * prefix 0 = cmnd using subtopic
+ * prefix 1 = stat using subtopic
+ * prefix 2 = tele using subtopic
+ * prefix 4 = cmnd using subtopic or RESULT
+ * prefix 5 = stat using subtopic or RESULT
+ * prefix 6 = tele using subtopic or RESULT
+ *
+ * @param prefix 
+ * @param subtopic 
+ * @param payload 
+ * @param binary_length 
+ * @param retained 
+ */
 void MqttPublishPayloadPrefixTopic_P(uint32_t prefix, const char* subtopic, const char* payload, uint32_t binary_length, bool retained) {
-/*
-  Publish <prefix>/<device>/<RESULT or <subtopic>> payload string or binary when binary_length set with optional retained
-
-  prefix 0 = cmnd using subtopic
-  prefix 1 = stat using subtopic
-  prefix 2 = tele using subtopic
-  prefix 4 = cmnd using subtopic or RESULT
-  prefix 5 = stat using subtopic or RESULT
-  prefix 6 = tele using subtopic or RESULT
-*/
   char romram[64];
   snprintf_P(romram, sizeof(romram), ((prefix > 3) && !Settings->flag.mqtt_response) ? S_RSLT_RESULT : subtopic);  // SetOption4 - Switch between MQTT RESULT or COMMAND
   UpperCase(romram, romram);
@@ -728,49 +769,94 @@ void MqttPublishPayloadPrefixTopic_P(uint32_t prefix, const char* subtopic, cons
 #endif // USE_MQTT_AWS_IOT
 }
 
-void MqttPublishPayloadPrefixTopic_P(uint32_t prefix, const char* subtopic, const char* payload, uint32_t binary_length) {
-  // Publish <prefix>/<device>/<RESULT or <subtopic>> payload string or binary when binary_length set no retained
+/**
+ * @brief Publish <prefix>/<device>/<RESULT or <subtopic>> payload string or binary when binary_length set no retained
+ * 
+ * @param prefix 
+ * @param subtopic 
+ * @param payload 
+ * @param binary_length 
+ */
+void MqttPublishPayloadPrefixTopic_P(uint32_t prefix, const char* subtopic, const char* payload, uint32_t binary_length) { 
   MqttPublishPayloadPrefixTopic_P(prefix, subtopic, payload, binary_length, false);
 }
 
+/**
+ * @brief Publish <prefix>/<device>/<RESULT or <subtopic>> payload string no retained. Payload lengh will be calculated
+ * 
+ * @param prefix 
+ * @param subtopic 
+ * @param payload 
+ */
 void MqttPublishPayloadPrefixTopic_P(uint32_t prefix, const char* subtopic, const char* payload) {
-  // Publish <prefix>/<device>/<RESULT or <subtopic>> payload string no retained
   MqttPublishPayloadPrefixTopic_P(prefix, subtopic, payload, 0, false);
 }
 
+/**
+ * @brief Publish <prefix>/<device>/<RESULT or <subtopic>> payload string with optional retained. then process rules
+ * 
+ * @param prefix 
+ * @param subtopic 
+ * @param payload 
+ * @param retained 
+ */
 void MqttPublishPayloadPrefixTopicRulesProcess_P(uint32_t prefix, const char* subtopic, const char* payload, bool retained) {
-  // Publish <prefix>/<device>/<RESULT or <subtopic>> payload string with optional retained
-  //   then process rules
   MqttPublishPayloadPrefixTopic_P(prefix, subtopic, payload, 0, retained);
   XdrvRulesProcess(0, payload);
 }
 
+/**
+ * @brief Publish <prefix>/<device>/<RESULT or <subtopic>> default payload string no retained. then process rules
+ * 
+ * @param prefix 
+ * @param subtopic 
+ * @param payload 
+ */
 void MqttPublishPayloadPrefixTopicRulesProcess_P(uint32_t prefix, const char* subtopic, const char* payload) {
-  // Publish <prefix>/<device>/<RESULT or <subtopic>> default ResponseData string no retained
-  //   then process rules
   MqttPublishPayloadPrefixTopicRulesProcess_P(prefix, subtopic, payload, false);
 }
 
+/**
+ * @brief Publish <prefix>/<device>/<RESULT or <subtopic>> default ResponseData string with optional retained
+ * 
+ * @param prefix 
+ * @param subtopic 
+ * @param retained 
+ */
 void MqttPublishPrefixTopic_P(uint32_t prefix, const char* subtopic, bool retained) {
-  // Publish <prefix>/<device>/<RESULT or <subtopic>> default ResponseData string with optional retained
+  // 
   MqttPublishPayloadPrefixTopic_P(prefix, subtopic, ResponseData(), 0, retained);
 }
 
+/**
+ * @brief Publish <prefix>/<device>/<RESULT or <subtopic>> default ResponseData string no retained
+ * 
+ * @param prefix 
+ * @param subtopic 
+ */
 void MqttPublishPrefixTopic_P(uint32_t prefix, const char* subtopic) {
-  // Publish <prefix>/<device>/<RESULT or <subtopic>> default ResponseData string no retained
   MqttPublishPrefixTopic_P(prefix, subtopic, false);
 }
 
+/**
+ * @brief Publish <prefix>/<device>/<RESULT or <subtopic>> default ResponseData string with optional retained. then process rules
+ * 
+ * @param prefix 
+ * @param subtopic 
+ * @param retained 
+ */
 void MqttPublishPrefixTopicRulesProcess_P(uint32_t prefix, const char* subtopic, bool retained) {
-  // Publish <prefix>/<device>/<RESULT or <subtopic>> default ResponseData string with optional retained
-  //   then process rules
   MqttPublishPrefixTopic_P(prefix, subtopic, retained);
   XdrvRulesProcess(0);
 }
 
+/**
+ * @brief Publish <prefix>/<device>/<RESULT or <subtopic>> default ResponseData string no retained. then process rules
+ * 
+ * @param prefix 
+ * @param subtopic 
+ */
 void MqttPublishPrefixTopicRulesProcess_P(uint32_t prefix, const char* subtopic) {
-  // Publish <prefix>/<device>/<RESULT or <subtopic>> default ResponseData string no retained
-  //   then process rules
   MqttPublishPrefixTopicRulesProcess_P(prefix, subtopic, false);
 }
 
