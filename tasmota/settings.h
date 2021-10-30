@@ -20,6 +20,8 @@
 #ifndef _SETTINGS_H_
 #define _SETTINGS_H_
 
+#include <modbus_bridge.h>
+
 const uint8_t PARAM8_SIZE = 18;            // Number of param bytes (SetOption)
 
 // Bitfield to be used for any SetOption0 .. SetOption31 persistent single bit

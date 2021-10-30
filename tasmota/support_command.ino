@@ -46,7 +46,7 @@ const char kTasmotaCommands[] PROGMEM = "|"  // No prefix
 #ifdef ESP32
    "|Info|" D_CMND_TOUCH_CAL "|" D_CMND_TOUCH_THRES "|" D_CMND_TOUCH_NUM "|" D_CMND_CPU_FREQUENCY
 #endif  // ESP32
-  ;
+  "|" D_CMND_MQTTBRIDGE;
 
 SO_SYNONYMS(kTasmotaSynonyms,
   127,
@@ -78,6 +78,8 @@ void (* const TasmotaCommand[])(void) PROGMEM = {
 #ifdef ESP32
   , &CmndInfo, &CmndTouchCal, &CmndTouchThres, &CmndTouchNum, &CmndCpuFrequency
 #endif  // ESP32
+  , &CmndMQTTBridge
+  
   };
 
 const char kWifiConfig[] PROGMEM =
@@ -2341,3 +2343,13 @@ void CmndTouchNum(void)
 }
 
 #endif  // ESP32
+
+
+void CmndMQTTBridge(void){
+
+  MQTT_TestBridge(XdrvMailbox.data);
+
+  //Prevent Negative response Code
+  ResponseCmndDone();
+
+}

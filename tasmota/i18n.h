@@ -405,6 +405,8 @@
 #define D_CMND_FILEUPLOAD "FileUpload"
 #define D_CMND_FILEDOWNLOAD "FileDownload"
 
+#define D_CMND_MQTTBRIDGE "mqttbridge"
+
 // Commands xdrv_01_webserver.ino
 #define D_CMND_WEBSERVER "Webserver"
   #define D_JSON_WEBSERVER_MODE "WebServerMode"
