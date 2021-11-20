@@ -480,7 +480,7 @@ void SleepDelay(uint32_t mseconds) {
 void Scheduler(void) {
   XdrvCall(FUNC_LOOP);
   XsnsCall(FUNC_LOOP);
-
+  
 // check LEAmDNS.h
 // MDNS.update() needs to be called in main loop
 #ifdef ESP8266                     // Not needed with esp32 mdns
@@ -525,6 +525,7 @@ void Scheduler(void) {
     Every250mSeconds();
     XdrvCall(FUNC_EVERY_250_MSECOND);
     XsnsCall(FUNC_EVERY_250_MSECOND);
+    ModbusToMQTT();
   }
 
   static uint32_t state_second = 0;                // State second timer

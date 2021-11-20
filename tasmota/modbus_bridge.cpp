@@ -58,10 +58,6 @@ static int GetKeyValue(int tokenCnt, jsmntok_t Tokens[], const char* key, const 
     return j;
 }
 
-
-
-
-
 /**
  * @brief (TODO) Init Method. Establish Modbus connection? other stuff? 
  * 
@@ -71,8 +67,26 @@ void modbus_bridgeInit(){
   if (status != 0) return;
 
   //TODO Get proper pins
-  modBusBridgeInstance = new TasmotaModbus(16 , 17);
+
+  //Using 
+  //16 RX
+  //17 TX
+  //--> TX works fine but no RX at all
+  //The new config with 
+  //3 RX
+  //1 TX
+  // Rx and Tx work but sometimes there are some itermittend issues
+  //Are those ports already used for somthing else?
+  modBusBridgeInstance = new TasmotaModbus(3 , 1);
   uint8_t result = modBusBridgeInstance->Begin(9600,1);
+  
+  //Other Uses of TasmotaModbus seems to all do that.
+  //TODO Check what its purpose is.
+  if (modBusBridgeInstance->hardwareSerial()) {
+      ClaimSerial();
+  }
+
+  //modBusBridgeInstance->m_hardserial
   status = 1;
 }
 
@@ -82,17 +96,21 @@ void modbus_bridgeInit(){
 // data:
 
 
-//Grab data from MQTT and send it via the modbus
-// "MQTTbridge/<Device ID>"
-void MQTTtoModbus(uint8_t address,uint8_t function,uint8_t data[]){
-modBusBridgeInstance->Send(address,function,data);
-}
-
-
 
 //Relay data of the modbus to MQTT
 // "MQTTbridge/<Device ID>"
-byte ModbusRx(uint8_t& address,uint8_t& function,uint8_t data[]){
+
+
+/**
+ * @brief This function provides access to recived messages.
+ * 
+ * @param address 
+ * @param function 
+ * @param data 
+ * @param include_crc if this is set to true then the CRC will be included in data, otherwise it will be omitted
+ * @return byte Number of bytes recived
+ */
+byte ModbusRx(uint8_t& address,uint8_t& function,uint8_t data[], bool include_crc = false ){
   byte status = 0;
 
   if(modBusBridgeInstance->ReceiveReady())
@@ -102,36 +120,47 @@ byte ModbusRx(uint8_t& address,uint8_t& function,uint8_t data[]){
     modBusBridgeInstance->ReceiveBuffer(InputBuff,cnt);
     memcpy(&address,InputBuff,sizeof(byte));
     memcpy(&function,InputBuff + 1,sizeof(byte));
-    memcpy(data,InputBuff +2 ,sizeof(byte)* (cnt-2));
-    status = cnt;
+    byte crcSub = include_crc ? 0 : 2;
+    memcpy(data,InputBuff +2 ,sizeof(byte)* (cnt-2 -crcSub));
+    status = cnt - crcSub;
   }
 
   //Status Holds the number of bytes read
   return status;
 }
 
+/**
+ * @brief Recives data from Modbus and Transmits it via MQTT
+ * 
+ */
 void ModbusToMQTT(){
    modbus_bridgeInit();
   byte address = 0;
   byte function = 0;
   byte data[252];
-  if (ModbusRx(address,function,data) > 0)
+  char str[252];
+  byte rxcnt =  ModbusRx(address,function,data);
+  if (rxcnt > 0)
   {
-
+    char jdata[RxJsonBuffSize] = "";
+    char jdat[RxJsonBuffSize - 50] = "";
+    for (int i = 0; i < rxcnt - 2; i++) {
+        sprintf(jdat, "%s\"0x%X\"", jdat, data[i]);
+        if (i + 1 < rxcnt - 2) strcat(jdat, ",");
+    }
+    sprintf(jdata, "{\"Address\": \"0x%X\",\"Function\": \"0x%X\",\"Data\": [%s]}", address, function, jdat);
+    
+    MqttPublishPayload("tasmota/modbusbridge/rx",jdata);
   }
-
-
-
 }
 
 
 /**
- * @brief Debug Method to test out things
+ * @brief Relays messages from MQTT to Modbus
  * 
- * @param data 
- * @param topic 
+ * @param json 
  */
-void MQTT_TestBridge(const char* json){
+void MQTTtoModbus(const char* json){
   jsmn_parser p;
   jsmntok_t t[257]; 
   byte data[252];
@@ -152,6 +181,6 @@ void MQTT_TestBridge(const char* json){
     byte datar[datalen];
     memcpy(datar,data,sizeof(byte)*datalen);
     modbus_bridgeInit();
-    MQTTtoModbus(address,function,datar);
+    modBusBridgeInstance->Send(address,function,datar);
   }
 }

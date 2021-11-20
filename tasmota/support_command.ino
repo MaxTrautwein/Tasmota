@@ -2347,7 +2347,7 @@ void CmndTouchNum(void)
 
 void CmndMQTTBridge(void){
 
-  MQTT_TestBridge(XdrvMailbox.data);
+  MQTTtoModbus(XdrvMailbox.data);
 
   //Prevent Negative response Code
   ResponseCmndDone();

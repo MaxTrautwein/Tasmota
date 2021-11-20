@@ -1,9 +1,15 @@
 
+
+const uint8_t ModbusMaxDataLen = 12; //Theoretical limit: 252. This should not be set below 4
+const uint16_t RxJsonBuffSize = 50 + 8 * ModbusMaxDataLen;
+
 /*
 * Accsess .ino Declerations 
 */
 
 void MqttPublishPayload(const char* topic, const char* payload);
+
+void ClaimSerial(void);
 
 
 /*
@@ -13,8 +19,7 @@ void MqttPublishPayload(const char* topic, const char* payload);
 
 void modbus_bridgeInit();
 
-void MQTTtoModbus();
-
 void ModbusToMQTT();
 
-void MQTT_TestBridge(const char* json);
+void MQTTtoModbus(const char* json);
+
