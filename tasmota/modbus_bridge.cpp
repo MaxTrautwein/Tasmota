@@ -1,17 +1,6 @@
 #include <TasmotaModbus.h>
 #include <modbus_bridge.h>
 #include <jsmn.h>
-//What is that for?
-#define XNRG_18             18
-
-// can be user defined in my_user_config.h
-#ifndef SDM72_SPEED
-  #define SDM72_SPEED       9600    // default SDM72 Modbus address
-#endif
-// can be user defined in my_user_config.h
-#ifndef SDM72_ADDR
-  #define SDM72_ADDR        1       // default SDM72 Modbus address Cant this be set via a call?
-#endif
 
 TasmotaModbus *modBusBridgeInstance;
 
@@ -33,6 +22,7 @@ static int GetKeyValue(int tokenCnt, jsmntok_t Tokens[],const char* key, const c
             strncpy(tOutData, json + Tokens[i + 1].start, len);
             strncpy(tOutData + len, "\0", 1);
             Outdata =(byte) strtoul(tOutData, &tOutData, 16) ;
+            free(tOutData);
         }
     }
     return len;
@@ -52,6 +42,7 @@ static int GetKeyValue(int tokenCnt, jsmntok_t Tokens[], const char* key, const 
                 strncpy(OutData, json + g->start, g->len);
                 strncpy(OutData + g->len, "\0", 1);
                 Return[j] = strtoul(OutData, &OutData, 16);
+                free(OutData);
             }
         }
     }
@@ -106,18 +97,19 @@ void modbus_bridgeInit(){
  * 
  * @param address 
  * @param function 
- * @param data 
+ * @param data
+ * @param ec Holds the Return / Error Code of TasmotaModbus->ReceiveBuffer
  * @param include_crc if this is set to true then the CRC will be included in data, otherwise it will be omitted
  * @return byte Number of bytes recived
  */
-byte ModbusRx(uint8_t& address,uint8_t& function,uint8_t data[], bool include_crc = false ){
+byte ModbusRx(uint8_t& address,uint8_t& function,uint8_t data[],uint8_t& ec ,bool include_crc = false ){
   byte status = 0;
 
   if(modBusBridgeInstance->ReceiveReady())
   {
     byte cnt= modBusBridgeInstance->ReceiveCount();
     byte InputBuff[cnt];
-    modBusBridgeInstance->ReceiveBuffer(InputBuff,cnt);
+    ec = modBusBridgeInstance->ReceiveBuffer(InputBuff,cnt);
     memcpy(&address,InputBuff,sizeof(byte));
     memcpy(&function,InputBuff + 1,sizeof(byte));
     byte crcSub = include_crc ? 0 : 2;
@@ -138,17 +130,17 @@ void ModbusToMQTT(){
   byte address = 0;
   byte function = 0;
   byte data[252];
-  char str[252];
-  byte rxcnt =  ModbusRx(address,function,data);
+  uint8_t errorCode;
+  byte rxcnt =  ModbusRx(address,function,data,errorCode);
   if (rxcnt > 0)
   {
     char jdata[RxJsonBuffSize] = "";
     char jdat[RxJsonBuffSize - 50] = "";
     for (int i = 0; i < rxcnt - 2; i++) {
-        sprintf(jdat, "%s\"0x%X\"", jdat, data[i]);
+        sprintf(jdat, "%s\"0x%02X\"", jdat, data[i]);
         if (i + 1 < rxcnt - 2) strcat(jdat, ",");
     }
-    sprintf(jdata, "{\"Address\": \"0x%X\",\"Function\": \"0x%X\",\"Data\": [%s]}", address, function, jdat);
+    sprintf(jdata, "{\"Address\": \"0x%02X\",\"Function\": \"0x%02X\",\"Status\":\"%u\",\"Data\": [%s]}", address, function, errorCode,jdat);
     
     MqttPublishPayload("tasmota/modbusbridge/rx",jdata);
   }

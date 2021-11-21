@@ -1,6 +1,6 @@
 
 
-const uint8_t ModbusMaxDataLen = 12; //Theoretical limit: 252. This should not be set below 4
+const uint8_t ModbusMaxDataLen = 60; //Theoretical limit: 252. If the value is set to low it might result in a buffer overflow
 const uint16_t RxJsonBuffSize = 50 + 8 * ModbusMaxDataLen;
 
 /*
