@@ -11,13 +11,16 @@ void MqttPublishPayload(const char* topic, const char* payload);
 
 void ClaimSerial(void);
 
+int IRAM_ATTR Pin(uint32_t gpio , uint32_t index);
+//int Pin(uint32_t gpio, uint32_t index);
+
+
 
 /*
 * Methods
 */
 
-
-void modbus_bridgeInit();
+void modbus_bridgeInit(uint8_t mode);
 
 void ModbusToMQTT();
 

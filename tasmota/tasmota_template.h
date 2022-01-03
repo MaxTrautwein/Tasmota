@@ -177,6 +177,7 @@ enum UserSelectablePins {
   GPIO_HM330X_SET,                     // HM330X SET pin (sleep when low)
   GPIO_HEARTBEAT, GPIO_HEARTBEAT_INV,
   GPIO_SHIFT595_SRCLK, GPIO_SHIFT595_RCLK, GPIO_SHIFT595_OE, GPIO_SHIFT595_SER,   // 74x595 Shift register
+  GPIO_MODBUSBRIDGE_TX, GPIO_MODBUSBRIDGE_RX,    // MQTT Modbus Bridge
   GPIO_SENSOR_END };
 
 enum ProgramSelectablePins {
@@ -375,6 +376,7 @@ const char kSensorNames[] PROGMEM =
   D_SENSOR_HEARTBEAT "|" D_SENSOR_HEARTBEAT "_i|"
 
   D_GPIO_SHIFT595_SRCLK "|" D_GPIO_SHIFT595_RCLK "|" D_GPIO_SHIFT595_OE "|" D_GPIO_SHIFT595_SER "|"
+  D_GPIO_MODBUSBRIDGE_TX "|" D_GPIO_MODBUSBRIDGE_RX "|"
 ;
 
 const char kSensorNamesFixed[] PROGMEM =
@@ -949,6 +951,8 @@ const uint16_t kGpioNiceList[] PROGMEM = {
   AGPIO(GPIO_SHIFT595_OE),
   AGPIO(GPIO_SHIFT595_SER),
 #endif
+  AGPIO(GPIO_MODBUSBRIDGE_TX),      // MQTT Modbus Bridge
+  AGPIO(GPIO_MODBUSBRIDGE_RX),      // MQTT Modbus Bridge
 };
 
 /*-------------------------------------------------------------------------------------------*\

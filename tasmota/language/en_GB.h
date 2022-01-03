@@ -847,6 +847,8 @@
 #define D_GPIO_SHIFT595_RCLK   "74x595 RCLK"
 #define D_GPIO_SHIFT595_OE     "74x595 OE"
 #define D_GPIO_SHIFT595_SER    "74x595 SER"
+#define D_GPIO_MODBUSBRIDGE_TX     "Modbus MQTT TX"
+#define D_GPIO_MODBUSBRIDGE_RX   "Modbus MQTT RX"
 
 // Units
 #define D_UNIT_AMPERE "A"

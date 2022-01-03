@@ -139,6 +139,8 @@ const be_const_member_t lv_gpio_constants[] = {
     { "MHZ_TXD", (int32_t) GPIO_MHZ_TXD },
     { "MIEL_HVAC_RX", (int32_t) GPIO_MIEL_HVAC_RX },
     { "MIEL_HVAC_TX", (int32_t) GPIO_MIEL_HVAC_TX },
+    { "MODBUSBRIDGE_RX", (int32_t) GPIO_MODBUSBRIDGE_RX },
+    { "MODBUSBRIDGE_TX", (int32_t) GPIO_MODBUSBRIDGE_TX },
     { "MP3_DFR562", (int32_t) GPIO_MP3_DFR562 },
     { "NEOPOOL_RX", (int32_t) GPIO_NEOPOOL_RX },
     { "NEOPOOL_TX", (int32_t) GPIO_NEOPOOL_TX },

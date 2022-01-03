@@ -1289,7 +1289,10 @@ void ConvertGpios(void) {
 }
 #endif  // ESP8266
 
-int IRAM_ATTR Pin(uint32_t gpio, uint32_t index = 0);
+int IRAM_ATTR Pin(uint32_t gpio){
+  return Pin(gpio,0);
+}
+
 int IRAM_ATTR Pin(uint32_t gpio, uint32_t index) {
   uint16_t real_gpio = gpio << 5;
   uint16_t mask = 0xFFE0;

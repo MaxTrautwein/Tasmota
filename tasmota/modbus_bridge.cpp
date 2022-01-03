@@ -1,6 +1,11 @@
 #include <TasmotaModbus.h>
 #include <modbus_bridge.h>
 #include <jsmn.h>
+#include <language/en_GB.h>
+#include <tasmota.h>
+#include <tasmota_globals.h>
+#include <tasmota_template.h>
+
 
 TasmotaModbus *modBusBridgeInstance;
 
@@ -53,10 +58,9 @@ static int GetKeyValue(int tokenCnt, jsmntok_t Tokens[], const char* key, const 
  * @brief (TODO) Init Method. Establish Modbus connection? other stuff? 
  * 
  */
-void modbus_bridgeInit(){
+void modbus_bridgeInit(uint8_t mode){
   static byte status = 0;
-  if (status != 0) return;
-
+  if (status != 0 && mode == 1) return;
   //TODO Get proper pins
 
   //Using 
@@ -68,11 +72,12 @@ void modbus_bridgeInit(){
   //1 TX
   // Rx and Tx work but sometimes there are some itermittend issues
   //Are those ports already used for somthing else?
-  modBusBridgeInstance = new TasmotaModbus(3 , 1);
+  modBusBridgeInstance = new TasmotaModbus(Pin(GPIO_MODBUSBRIDGE_RX,0) , Pin(GPIO_MODBUSBRIDGE_TX,0));
   uint8_t result = modBusBridgeInstance->Begin(9600,1);
   
   //Other Uses of TasmotaModbus seems to all do that.
   //TODO Check what its purpose is.
+  //hardwareSerial is not used for the ESP32
   if (modBusBridgeInstance->hardwareSerial()) {
       ClaimSerial();
   }
@@ -80,7 +85,6 @@ void modbus_bridgeInit(){
   //modBusBridgeInstance->m_hardserial
   status = 1;
 }
-
 // JSON:
 // id:
 // function:
@@ -126,7 +130,7 @@ byte ModbusRx(uint8_t& address,uint8_t& function,uint8_t data[],uint8_t& ec ,boo
  * 
  */
 void ModbusToMQTT(){
-   modbus_bridgeInit();
+   modbus_bridgeInit(1);
   byte address = 0;
   byte function = 0;
   byte data[252];
@@ -172,7 +176,7 @@ void MQTTtoModbus(const char* json){
   {
     byte datar[datalen];
     memcpy(datar,data,sizeof(byte)*datalen);
-    modbus_bridgeInit();
+    modbus_bridgeInit(1);
     modBusBridgeInstance->Send(address,function,datar);
   }
 }
