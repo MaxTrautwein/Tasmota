@@ -48,10 +48,12 @@ void TasDiscoverMessage(void) {
   }
 
   bool TuyaMod = false;
+#ifdef USE_TUYA_MCU
+  TuyaMod = IsModuleTuya();
+#endif
   bool iFanMod = false;
 #ifdef ESP8266
-  if ((TUYA_DIMMER == TasmotaGlobal.module_type) || (SK03_TUYA == TasmotaGlobal.module_type)) { TuyaMod = true; };
-  if ((SONOFF_IFAN02 == TasmotaGlobal.module_type) || (SONOFF_IFAN03 == TasmotaGlobal.module_type)) { iFanMod = true; };
+  iFanMod = ((SONOFF_IFAN02 == TasmotaGlobal.module_type) || (SONOFF_IFAN03 == TasmotaGlobal.module_type));
 #endif  // ESP8266
 
   ResponseAppend_P(PSTR("],"                                   // Friendly Names (end)
@@ -106,12 +108,11 @@ void TasDiscoverMessage(void) {
 #ifdef USE_SHUTTER
       if (Settings->flag3.shutter_mode) {
         for (uint32_t k = 0; k < MAX_SHUTTERS; k++) {
-          if (0 == Settings->shutter_startrelay[k]) {
-            break;
+          if (Settings->shutter_startrelay[k] > 0) {
+            Shutter[Settings->shutter_startrelay[k]-1] = Shutter[Settings->shutter_startrelay[k]] = 1;
           } else {
-            if (Settings->shutter_startrelay[k] > 0 && Settings->shutter_startrelay[k] <= MAX_SHUTTER_RELAYS) {
-              Shutter[Settings->shutter_startrelay[k]-1] = Shutter[Settings->shutter_startrelay[k]] = 1;
-            }
+            // terminate loop at first INVALID Settings->shutter_startrelay[i].
+            break;
           }
         }
       }
@@ -216,7 +217,7 @@ void TasDiscovery(void) {
 
   if (!Settings->flag.hass_discovery) {                         // SetOption19 - Clear retained message
     Response_P(PSTR("{\"sn\":"));
-    MqttShowSensor();
+    MqttShowSensor(true);
     ResponseAppend_P(PSTR(",\"ver\":1}"));
   }
   snprintf_P(stopic, sizeof(stopic), PSTR("tasmota/discovery/%s/sensors"), NetworkUniqueId().c_str());

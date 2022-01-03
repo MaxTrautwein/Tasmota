@@ -133,7 +133,6 @@ String EthernetMacAddress(void);
 #undef FIRMWARE_MINIMAL                            // Minimal is not supported as not needed
 
 // Hardware has no ESP32
-#undef USE_TUYA_DIMMER
 #undef USE_PWM_DIMMER
 #undef USE_EXS_DIMMER
 #undef USE_ARMTRONIX_DIMMERS
@@ -146,9 +145,6 @@ String EthernetMacAddress(void);
 #undef USE_RF_FLASH
 
 // Not ported (yet)
-
-#undef USE_MY92X1
-#undef USE_TUYA_MCU
 #undef USE_PS_16_DZ
 
 #undef USE_HM10                     // Disable support for HM-10 as a BLE-bridge as an alternative is using the internal ESP32 BLE
@@ -160,7 +156,7 @@ String EthernetMacAddress(void);
  * Fallback parameters
 \*********************************************************************************************/
 
-#ifdef USE_PID
+#if defined(USE_PID) && (!defined(PID_USE_TIMPROP) || (PID_USE_TIMPROP > 0))
 #define USE_TIMEPROP
 #endif
                                                // See https://github.com/esp8266/Arduino/pull/4889
@@ -494,6 +490,23 @@ bool first_device_group_is_local = true;
 #else
 #define SHOW_FREE_MEM(WHERE)
 #endif
+
+#ifndef USE_PROFILING
+#undef USE_PROFILE_DRIVER
+#undef USE_PROFILE_FUNCTION
+#endif
+
+#ifdef USE_PROFILE_DRIVER
+#define PROFILE_DRIVER(DRIVER, FUNCTION, START) AddLogDriver(DRIVER, FUNCTION, START)
+#else
+#define PROFILE_DRIVER(DRIVER, FUNCTION, START)
+#endif  // USE_PROFILE_DRIVER
+
+#ifdef USE_PROFILE_FUNCTION
+#define PROFILE_FUNCTION(DRIVER, INDEX, FUNCTION, START) AddLogFunction(DRIVER, INDEX, FUNCTION, START)
+#else
+#define PROFILE_FUNCTION(DRIVER, INDEX, FUNCTION, START)
+#endif  // USE_PROFILE_DRIVER
 
 /*********************************************************************************************\
  * Macro for SetOption synonyms

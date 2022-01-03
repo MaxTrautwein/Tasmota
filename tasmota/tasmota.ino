@@ -35,9 +35,13 @@
 // Libraries
 #include <ESP8266HTTPClient.h>              // Ota
 #include <ESP8266httpUpdate.h>              // Ota
+#ifdef ESP32
+  #include "HTTPUpdateLight.h"              // Ota over HTTPS for ESP32
+#endif
 #include <StreamString.h>                   // Webserver, Updater
 #include <ext_printf.h>
 #include <SBuffer.hpp>
+#include <LList.h>
 #include <JsonParser.h>
 #include <JsonGenerator.h>
 #ifdef USE_ARDUINO_OTA
@@ -78,6 +82,10 @@
 // Structs
 #include "settings.h"
 
+#ifdef CONFIG_IDF_TARGET_ESP32
+#include "soc/efuse_reg.h"
+#endif
+
 /*********************************************************************************************\
  * Global variables
 \*********************************************************************************************/
@@ -86,7 +94,7 @@ const uint32_t VERSION_MARKER[] PROGMEM = { 0x5AA55AA5, 0xFFFFFFFF, 0xA55AA55A }
 
 WiFiUDP PortUdp;                            // UDP Syslog and Alexa
 
-struct {
+struct TasmotaGlobal_t {
   uint32_t global_update;                   // Timestamp of last global temperature and humidity update
   uint32_t baudrate;                        // Current Serial baudrate
   uint32_t pulse_timer[MAX_PULSETIMERS];    // Power off timer
@@ -144,6 +152,8 @@ struct {
   bool enable_logging;                      // Enable logging
 
   StateBitfield global_state;               // Global states (currently Wifi and Mqtt) (8 bits)
+  uint8_t init_state;                       // Tasmota init state
+  uint8_t heartbeat_inverted;               // Heartbeat pulse inverted flag
   uint8_t spi_enabled;                      // SPI configured
   uint8_t soft_spi_enabled;                 // Software SPI configured
   uint8_t blinks;                           // Number of LED blinks
@@ -174,6 +184,9 @@ struct {
   uint8_t last_source;                      // Last command source
   uint8_t shutters_present;                 // Number of actual define shutters
   uint8_t discovery_counter;                // Delayed discovery counter
+#ifdef USE_PWM_DIMMER
+  uint8_t restore_powered_off_led_counter;  // Seconds before powered-off LED (LEDLink) is restored
+#endif  // USE_PWM_DIMMER
 
 #ifndef SUPPORT_IF_STATEMENT
   uint8_t backlog_index;                    // Command backlog index
@@ -219,8 +232,21 @@ void setup(void) {
 #ifdef ESP32
 #ifdef DISABLE_ESP32_BROWNOUT
   DisableBrownout();      // Workaround possible weak LDO resulting in brownout detection during Wifi connection
-#endif
-#endif
+#endif  // DISABLE_ESP32_BROWNOUT
+
+#ifdef CONFIG_IDF_TARGET_ESP32
+  // restore GPIO16/17 if no PSRAM is found
+  if (!FoundPSRAM()) {
+    // test if the CPU is not pico
+    uint32_t chip_ver = REG_GET_FIELD(EFUSE_BLK0_RDATA3_REG, EFUSE_RD_CHIP_VER_PKG);
+    uint32_t pkg_version = chip_ver & 0x7;
+    if (pkg_version <= 3) {   // D0WD, S0WD, D2WD
+      gpio_reset_pin(GPIO_NUM_16);
+      gpio_reset_pin(GPIO_NUM_17);
+    }
+  }
+#endif  // CONFIG_IDF_TARGET_ESP32
+#endif  // ESP32
 
   RtcPreInit();
   SettingsInit();
@@ -374,10 +400,11 @@ void setup(void) {
 
   memcpy_P(TasmotaGlobal.version, VERSION_MARKER, 1);  // Dummy for compiler saving VERSION_MARKER
 
-  snprintf_P(TasmotaGlobal.version, sizeof(TasmotaGlobal.version), PSTR("%d.%d.%d"), VERSION >> 24 & 0xff, VERSION >> 16 & 0xff, VERSION >> 8 & 0xff);  // Release version 6.3.0
-  if (VERSION & 0xff) {  // Development or patched version 6.3.0.10
+  snprintf_P(TasmotaGlobal.version, sizeof(TasmotaGlobal.version), PSTR("%d%d.%02d"), VERSION >> 24 & 0xff, VERSION >> 16 & 0xff, VERSION >> 8 & 0xff);  // Release version 2022.01
+  if (VERSION & 0xff) {  // Development or patched version 2022.01.10
     snprintf_P(TasmotaGlobal.version, sizeof(TasmotaGlobal.version), PSTR("%s.%d"), TasmotaGlobal.version, VERSION & 0xff);
   }
+
   // Thehackbox inserts "release" or "commit number" before compiling using sed -i -e 's/PSTR("(%s)")/PSTR("(85cff52-%s)")/g' tasmota.ino
   snprintf_P(TasmotaGlobal.image_name, sizeof(TasmotaGlobal.image_name), PSTR("(%s)"), PSTR(CODE_IMAGE_STR));  // Results in (85cff52-tasmota) or (release-tasmota)
 
@@ -410,6 +437,8 @@ void setup(void) {
 
   XdrvCall(FUNC_PRE_INIT);
   XsnsCall(FUNC_PRE_INIT);
+
+  TasmotaGlobal.init_state = INIT_GPIOS;
 
   SetPowerOnState();
   WifiConnect();
@@ -558,7 +587,7 @@ void loop(void) {
       SleepDelay((uint32_t)TasmotaGlobal.sleep - my_activity);  // Provide time for background tasks like wifi
     } else {
       if (TasmotaGlobal.global_state.network_down) {
-        SleepDelay(my_activity /2);                // If wifi down and my_activity > setoption36 then force loop delay to 1/3 of my_activity period
+        SleepDelay(my_activity /2);                // If wifi down and my_activity > setoption36 then force loop delay to 1/2 of my_activity period
       }
     }
   }

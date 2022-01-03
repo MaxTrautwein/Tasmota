@@ -38,6 +38,8 @@ TasmotaSerial *tms_obj_list[16];
 #endif  // ESP8266
 #ifdef ESP32
 
+#include "driver/uart.h"
+
 #if CONFIG_IDF_TARGET_ESP32           // ESP32/PICO-D4
 static int tasmota_serial_index = 2;  // Allow UART2 and UART1 only
 #elif CONFIG_IDF_TARGET_ESP32S2       // ESP32-S2
@@ -119,21 +121,6 @@ bool TasmotaSerial::isValidGPIOpin(int pin) {
 
 bool TasmotaSerial::begin(uint32_t speed, uint32_t config) {
   if (!m_valid) { return false; }
-  if (config > 2) {
-    // Legacy support where software serial fakes two stop bits if either stop bits is 2 or parity is not None
-    m_stop_bits = ((config &0x30) >> 5) +1;
-    if ((1 == m_stop_bits) && (config &0x03)) {
-      m_stop_bits++;
-    }
-  } else {
-    m_stop_bits = ((config -1) &1) +1;
-#ifdef ESP8266
-    config = (2 == m_stop_bits) ? (uint32_t)SERIAL_8N2 : (uint32_t)SERIAL_8N1;
-#endif  // ESP8266
-#ifdef ESP32
-    config = (2 == m_stop_bits) ? SERIAL_8N2 : SERIAL_8N1;
-#endif  // ESP32
-  }
 
   if (m_hardserial) {
 #ifdef ESP8266
@@ -151,9 +138,27 @@ bool TasmotaSerial::begin(uint32_t speed, uint32_t config) {
       m_uart = tasmota_serial_index;
       tasmota_serial_index--;
       TSerial = new HardwareSerial(m_uart);
-      TSerial->begin(speed, config, m_rx_pin, m_tx_pin);
-      if (serial_buffer_size > 256) {
+      if (serial_buffer_size > 256) {  // RX Buffer can't be resized when Serial is already running (HardwareSerial.cpp)
         TSerial->setRxBufferSize(serial_buffer_size);
+      }
+      TSerial->begin(speed, config, m_rx_pin, m_tx_pin);
+      // For low bit rate, below 9600, set the Full RX threshold at 10 bytes instead of the default 120
+      if (speed <= 9600) {
+        // At 9600, 10 chars are ~10ms
+        uart_set_rx_full_threshold(m_uart, 10);
+      } else if (speed < 115200) {
+        // At 19200, 120 chars are ~60ms
+        // At 76800, 120 chars are ~15ms
+        uart_set_rx_full_threshold(m_uart, 120);
+      } else {
+        // At 115200, 256 chars are ~20ms
+        // Zigbee requires to keep frames together, i.e. 256 bytes max
+        uart_set_rx_full_threshold(m_uart, 256);
+      }
+      // For bitrate below 115200, set the Rx time out to 6 chars instead of the default 10
+      if (speed < 115200) {
+        // At 76800 the timeout is ~1ms
+        uart_set_rx_timeout(m_uart, 6);
       }
     } else {
       m_valid = false;
@@ -161,6 +166,18 @@ bool TasmotaSerial::begin(uint32_t speed, uint32_t config) {
 //    Serial.printf("TSR: Using UART%d\n", m_uart);
 #endif  // ESP32
   } else {
+    // Software serial fakes two stop bits if either stop bits is 2 or parity is not None
+    // #define UART_NB_STOP_BIT_0    0B00000000
+    // #define UART_NB_STOP_BIT_1    0B00010000
+    // #define UART_NB_STOP_BIT_15   0B00100000
+    // #define UART_NB_STOP_BIT_2    0B00110000
+    m_stop_bits = ((config &0x30) >> 5) +1;
+    // #define UART_PARITY_NONE      0B00000000
+    // #define UART_PARITY_EVEN      0B00000010
+    // #define UART_PARITY_ODD       0B00000011
+    if ((1 == m_stop_bits) && (config &0x03)) {
+      m_stop_bits++;
+    }
     // Use getCycleCount() loop to get as exact timing as possible
     m_bit_time = ESP.getCpuFreqMHz() * 1000000 / speed;
     m_bit_start_time = m_bit_time + m_bit_time/3 - (ESP.getCpuFreqMHz() > 120 ? 700 : 500); // pre-compute first wait

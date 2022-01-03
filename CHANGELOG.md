@@ -3,12 +3,186 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - Development
 
-## [9.5.0.8]
+## [2022.01.1]
+### Changed
+- PubSubClient library from v2.8.12 to v2.8.13
+- From Semantic Versioning (SemVer) to Calendar Versioning (CalVer)
+
+### Fixed
+- Intermittent exceptions and heap corruption due to PubSubClient library buffer overflow (#13700)
+
+## [10.1.0.3] 20211231
+### Added
+- Command ``SSerialConfig <serialconfig>`` to change Serial Bridge configuration
+
+### Fixed
+- DHT support negative temperatures on different hardware (#14173)
+- ESP32 Provide proper OTA_URL for tasmota32solo1 (#14202)
+- Hardware serial parity and stop bits support (#14212)
+
+### Changed
+- LVGL update from 8.0.2 to 8.1.0
+
+## [10.1.0.2] 20211225
+### Changed
+- TasmotaSerial library from v3.3.0 to v3.4.0 - reverted (#14153)
+- Force initial serial configuration even if no serial GPIO's are enabled (#14153)
+- Revert change to fix extra flashwrite before QuickPowerDetection (#14153)
+- Increase SerialBridge receive buffer from 130 to 256 characters - reverted (#14153)
+- ESP8266Audio library from v1.9.2 to v1.9.5 (#14172)
+- ESP8266SAM library from v1.0 to v1.0.1 (#14172)
+
+### Fixed
+- Serial broken after #14153 - reverted
+
+## [10.1.0.1] 20211223
+### Added
+- PWM Dimmer two button support (#13993)
+- Device Group Send full status item (#14045)
+- Support for MAX7219 Dot Matrix displays (#14091)
+- ESP32 support for TuyaMcu
+- ESP32 Berry features
+
+### Changed
+- Mitsubishi HVAC temperature resolution (#13936)
+- Remove restriction of topic must differ from mqttclient (#14019)
+
+### Fixed
+- EZOO2 sensor message format (#14000)
+- ESP32 Webcam exception during flashwrites
+- ESP32 LedPwmMode exception (#14073)
+- ESP32 Compile error when I2S_Audio is enabled (#14095)
+
+## [Released]
+
+## [10.1.0] 20211208
+- Release Noelle
+
+### Added
+- Berry added ``tcpclient``
+
+## [10.0.0.4] 20211208
+### Added
+- (Internal) Support for FUNC_BUTTON_MULTI_PRESSED in (light)drivers
+- Support for GPE Multi color smart light as sold by Action in the Netherlands
+- Support for 74xx595 8-bit shift registers (#13921)
+
+### Changed
+- (Internal) Range conversion edge values
+- NimBLE to v.1.3.3
+- MQTT TLS dual mode (CA or fingeprint) in same firmware, ``SetOption132 1`` to force fingerprint
+- Toolchains for ESP32x changed from 8.4.0-2021r1 to 8.4.0-2021r2
+
+### Fixed
+- Tuya dimmer range issue (#13849)
+- BLE Memory leak with update NimBLE v.1.3.1 to v.1.3.3
+- Compile error BLE EQ3 driver with core 2.0.x (#13948)
+
+## [10.0.0.3] 20211130
+### Added
+- Shutter support for venetian blinds with tilt control
+- ESP32 Autoconfiguration
+- ESP32 fix leftover GPIO configuration after restart
+- ESP32 Proof of Concept Sonoff SPM with limited functionality (switching and energy monitoring) (#13447)
+- WS2812 scheme 13 stairs effect (#13595)
+- ESP32 Preliminary support for Tasmota Apps (.tapp extesions)
+- ESP32 Berry support for neopixel (WS2812, SK6812)
+- Command ``IfxPeriod `` to overrule ``Teleperiod`` for Influx messages (#13750)
+- ESP32 OTA over HTTPS
+- ESP32 Berry ``import re`` regex module
+- ESP32 HTTPS support to ``WebQuery``
+
+### Changed
+- ESP8266 Gratuitous ARP enabled and set to 60 seconds (#13623)
+- Removed ILI9488 driver in favor of Unversal Display Driver
+- IRremoteESP8266 library from v2.7.20 to v2.8.0 (#13738)
+- Ethernet hostname ending in ``_eth`` to ``-eth`` according to RFC952
+- ESP32 core library from v2.0.1 to v2.0.1.1 (#13768)
+
+### Fixed
+- ESP32 analog NTC temperature calculation (#13703)
+- ESP32 ethernet broken by core 2.x
+- ESP32 I2C clock stretch issue (#13768)
+
+### Removed
+- ILI9488 driver in favour of Universal Display driver (#13719)
+
+## [10.0.0.2] 20211113
+### Added
+- Support for HDC2010 temperature/humidity sensor by Luc Boudreau (#13633)
+
+### Breaking Changed
+- ESP32-S2 TSettings memory usage fixed to 4096 bytes regression from v9.5.0.8
+
+### Changed
+- ESP32 core library from v1.0.7.5 to v2.0.1
+
+## [10.0.0.1]
+### Added
+- Berry add module ``python_compat`` to be closer to Python syntax (#13428)
+- 1 second heartbeat GPIO
+- Command ``TcpConfig`` for TCPBridge protocol configuration (#13565)
+
+### Changed
+- File editor no-wrap (#13427)
+- ESP32 core library from v1.0.7.4 to v1.0.7.5
+- ESP32-C3 core library from v2.0.0-post to v2.0.1-rc1
+
+### Fixed
+- Initial reset RTC memory based variables like EnergyToday and EnergyTotal
+- ESP32 Telegram compile error (#13435)
+- SML compile error (#13441)
+- GUI checkbox MQTT TLS not saved regression from v9.2.0.3 (#13442)
+- Discovery of shutters (#13572)
+- ESP32-C3 OneWire as used by DS18x20 (#13583)
+
+## [10.0.0] 20211019
+- Release Norman
+
+## [9.5.0.9] 20211019
+### Added
+- Command ``SetOption129 1`` to enable split total energy results (#13030)
+- Command ``SetOption130 1`` adding heap size (and ESP32 fragmentation) to logging timestamp for debugging
+- Commands ``EnergyTotal<phase>``, ``EnergyToday<phase>`` and ``EnergyYesterday<phase>`` to (re)set energy values
+- Commands ``EnergyUsage`` and ``EnergyExport`` to (re)set energy usage and export values
+- Berry add module ``import persist``
+- Support for BL0942 energy monitor (#13259)
+- Support for HM330X SeedStudio Grove Particule sensor (#13250)
+
+### Breaking Changed
+- ESP32 LVGL updated to v8.0.2
+
+### Changed
+- Removed command ``EnergyReset`` as it is replaced by new commands
+- Files starting with underscore in file system are no more hidden
+- ESP32 Memory display to exclude IRAM (i.e. less by 40-50KB) (#13294)
+- LVGL Berry namespace ``lv.*`` added and removed ``lv_*`` constants
+
+### Fixed
+- ESP32 restore GPIO16/17 if no PSRAM was found regression from v9.5.0.3
+- Restore functionality as documented when both GPIO_LED1 and GPIO_LED2 are used regression from v8.5.0 (#13368)
+
+## [9.5.0.8] 20210927
 ### Added
 - Command ``WebGetConfig <url>`` if ``#define USE_WEBGETCONFIG`` is enabled to restore/init configuration from external webserver (#13034)
 - Berry class ``webclient`` for HTTP/HTTPS requests
 - Support for ESP32S2 GPIOs
 - ESP32 add GPIO 6/7/8/11 to template and remove GPIO 28-31 (remapping so backwards compatible)
+- Crash recorder ``Status 12`` for ESP32/ESP32S2/ESP32C3, supporting Esp-idf 3.3/4.4
+- Support for ESP32/ESP32S2 DAC gpio via Berry
+- Berry support for Serial
+- Support for Sensirion SCD40/SCD41 CO2 sensor (#13139)
+- Support for BL0939 energy monitor as used in ESP32 based Sonoff Dual R3 V2 Pow (#13195)
+- Command ``WebQuery <url> GET|POST|PUT|PATCH [<headers>] <body>`` to extent HTTP requests (#13209)
+- Berry print stack trace when exception, more detailed with line numbers if `#define USE_BERRY_DEBUG`
+
+### Changed
+- M5 Stack Core2 uses UNIVERSAL_DISPLAY with enabled LVGL as default now
+- ``DisplayDimmer`` has now range 0..100 instead of 0..15
+- Minimum PWM Frequency lowered to 2Hz on ESP32 (#13123)
+- Use Tasmota Arduino Core32 1.0.7.4 for ESP32 builds (#13154)
+- Shrinked Webcam build, uses now `USE_TASMOTA_DISCOVERY` (#13148)
+- Berry revamped ``energy`` module to expose all C variables to Berry (read/write)
 
 ### Fixed
 - OpenTherm invalid JSON (#13028)
@@ -148,8 +322,6 @@ All notable changes to this project will be documented in this file.
 - NO VALID JSON regression from may 4th (#12440)
 - Telegram response decoding stopped working after 20210621 and exception on long result message (#12451)
 - Neopool compile error on DEBUG_TASMOTA_SENSOR (#12464)
-
-## [Released]
 
 ## [9.5.0] 20210617
 - Release Michael (Rossi)
@@ -769,6 +941,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - Triple-mode TLS via configuration in a single firmware (TLS AWS IoT, Letsencrypt and No-TLS)
+- Berry C mapping moved to a separate ``berry_mapping`` library
 
 ### Fixed
 - ESP32 PWM range

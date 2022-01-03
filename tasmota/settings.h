@@ -160,11 +160,11 @@ typedef union {                            // Restricted by MISRA-C Rule 18.4 bu
     uint32_t ds18x20_mean : 1;             // bit 12 (v9.3.1.2)  - SetOption126 - (DS18x20) Enable arithmetic mean over teleperiod for JSON temperature (1)
     uint32_t wifi_no_sleep : 1;            // bit 13 (v9.5.0.2)  - SetOption127 - (Wifi) Keep wifi in no-sleep mode, prevents some occasional unresponsiveness
     uint32_t disable_referer_chk : 1;      // bit 14 (v9.5.0.5)  - SetOption128 - (Web) Allow access without referer check
-    uint32_t spare15 : 1;                  // bit 15
-    uint32_t spare16 : 1;                  // bit 16
-    uint32_t spare17 : 1;                  // bit 17
-    uint32_t spare18 : 1;                  // bit 18
-    uint32_t spare19 : 1;                  // bit 19
+    uint32_t energy_phase : 1;             // bit 15 (v9.5.0.9)  - SetOption129 - (Energy) Show phase information
+    uint32_t show_heap_with_timestamp : 1; // bit 16 (v9.5.0.9)  - SetOption130 - (Debug) Show heap with logging timestamp
+    uint32_t tuya_allow_dimmer_0 : 1;      // bit 17 (v10.0.0.3) - SetOption131 - (Tuya) Allow save dimmer = 0 receved by MCU
+    uint32_t tls_use_fingerprint : 1;      // bit 18 (v10.0.0.4) - SetOption132 - (TLS) Use fingerprint validation instead of CA based
+    uint32_t shift595_invert_outputs : 1;  // bit 19 (v10.0.0.4) - SetOption133 - (Shift595) Invert outputs of 74x595 shift registers
     uint32_t spare20 : 1;                  // bit 20
     uint32_t spare21 : 1;                  // bit 21
     uint32_t spare22 : 1;                  // bit 22
@@ -252,7 +252,7 @@ typedef union {
     uint32_t sonoff_l1_music_sync : 1;     // bit 5  (v9.5.0.5) - CMND_L1MUSICSYNC - Enable sync to music
     uint32_t influxdb_default : 1;         // bit 6  (v9.5.0.5) - Set influxdb initial defaults if 0
     uint32_t influxdb_state : 1;           // bit 7  (v9.5.0.5) - CMND_IFX - Enable influxdb support
-    uint32_t spare08 : 1;                  // bit 8
+    uint32_t sspm_display : 1;             // bit 8  (v10.0.0.4) - CMND_SSPMDISPLAY - Enable gui display of powered on relays only
     uint32_t spare09 : 1;                  // bit 9
     uint32_t spare10 : 1;                  // bit 10
     uint32_t spare11 : 1;                  // bit 11
@@ -443,8 +443,8 @@ const uint8_t MAX_TUYA_FUNCTIONS = 16;
 typedef struct {
   uint16_t      cfg_holder;                // 000  v6 header
   uint16_t      cfg_size;                  // 002
-  unsigned long save_flag;                 // 004
-  unsigned long version;                   // 008
+  uint32_t      save_flag;                 // 004
+  uint32_t      version;                   // 008
   uint16_t      bootcount;                 // 00C
   uint16_t      cfg_crc;                   // 00E
   SOBitfield    flag;                      // 010
@@ -471,7 +471,7 @@ typedef struct {
   uint8_t       display_rows;              // 2D5
   uint8_t       display_cols[2];           // 2D6
   uint8_t       display_address[8];        // 2D8
-  uint8_t       display_dimmer;            // 2E0
+  int8_t        display_dimmer_protected;  // 2E0 - if positive range 0..15, if negative range 0..100 (neg) - don't use directly
   uint8_t       display_size;              // 2E1
   TimeRule      tflag[2];                  // 2E2
   uint16_t      pwm_frequency;             // 2E6
@@ -485,19 +485,23 @@ typedef struct {
   int16_t       toffset[2];                // 30E
   uint8_t       display_font;              // 312
   DisplayOptions  display_options;         // 313
+  int32_t       energy_kWhtoday_ph[3];     // 314
+  int32_t       energy_kWhyesterday_ph[3]; // 320
+  int32_t       energy_kWhtotal_ph[3];     // 32C
 
-  uint8_t       free_314[43];              // 314
+  uint8_t       free_338[6];               // 338
 
+  uint8_t       sserial_config;            // 33E
   uint8_t       tuyamcu_topic;             // 33F  Manage tuyaSend topic. ex_energy_power_delta on 6.6.0.20, replaced on 8.5.0.1
   uint16_t      domoticz_update_timer;     // 340
   uint16_t      pwm_range;                 // 342
-  unsigned long domoticz_relay_idx[MAX_DOMOTICZ_IDX];  // 344
-  unsigned long domoticz_key_idx[MAX_DOMOTICZ_IDX];    // 354
-  unsigned long energy_power_calibration;    // 364
-  unsigned long energy_voltage_calibration;  // 368
-  unsigned long energy_current_calibration;  // 36C
-  unsigned long energy_kWhtoday;           // 370
-  unsigned long energy_kWhyesterday;       // 374
+  uint32_t      domoticz_relay_idx[MAX_DOMOTICZ_IDX];  // 344
+  uint32_t      domoticz_key_idx[MAX_DOMOTICZ_IDX];    // 354
+  uint32_t      energy_power_calibration;    // 364
+  uint32_t      energy_voltage_calibration;  // 368
+  uint32_t      energy_current_calibration;  // 36C
+  uint32_t      energy_kWhtoday;           // 370
+  uint32_t      energy_kWhyesterday;       // 374
   uint16_t      energy_kWhdoy;             // 378
   uint16_t      energy_min_power;          // 37A
   uint16_t      energy_max_power;          // 37C
@@ -523,7 +527,7 @@ typedef struct {
 
   uint8_t       ex_switchmode[8];          // 3A4 - Free since 9.2.0.6
 
-  myio          my_gp;                     // 3AC  2 x 18 bytes (ESP8266) / 2 x 40 bytes (ESP32) / 2 x 22 bytes (ESP32-C3)
+  myio          my_gp;                     // 3AC  2x18 bytes (ESP8266) / 2x40 bytes (ESP32) / 2x22 bytes (ESP32-C3) / 2x47 bytes (ESP32-S2)
 #ifdef ESP8266
   uint16_t      gpio16_converted;          // 3D0
   uint8_t       free_esp8266_3D2[42];      // 3D2
@@ -533,7 +537,7 @@ typedef struct {
   uint8_t       free_esp32c3_3D8[36];      // 3D8  - Due to smaller myio
 #endif  // CONFIG_IDF_TARGET_ESP32C3
 #endif  // ESP32
-  mytmplt       user_template;             // 3FC  2 x 15 bytes (ESP8266) / 2 x 37 bytes (ESP32) / 2 x 23 bytes (ESP32-C3)
+  mytmplt       user_template;             // 3FC  2x15 bytes (ESP8266) / 2x37 bytes (ESP32) / 2x23 bytes (ESP32-C3) / 2x37 bytes (ESP32-S2)
 #ifdef ESP8266
   uint8_t       free_esp8266_41A[55];      // 41A
 #endif  // ESP8266
@@ -545,6 +549,9 @@ typedef struct {
   uint8_t       eth_clk_mode;              // 447
 
   uint8_t       free_esp32_448[4];         // 448
+#ifdef CONFIG_IDF_TARGET_ESP32S2
+  uint8_t       free_esp32s2_456[2];       // 456 - fix 32-bit offset for WebCamCfg
+#endif
 
   WebCamCfg     webcam_config;             // 44C
   uint8_t       eth_address;               // 450
@@ -562,9 +569,11 @@ typedef struct {
   myio8         ex_my_gp8;                 // 484 17 bytes (ESP8266) - Free since 9.0.0.1
 #endif  // ESP8266
 #ifdef ESP32
-
+#ifdef CONFIG_IDF_TARGET_ESP32S2
+  uint8_t       free_esp32s2_494[1];       // 494 - 2 bytes extra because of WebCamCfg 32-bit offset
+#else
   uint8_t       free_esp32_484[17];        // 484
-
+#endif
 #endif  // ESP32
 
   uint8_t       ex_my_adc0;                // 495  Free since 9.0.0.1
@@ -589,8 +598,11 @@ typedef struct {
 
   uint16_t      influxdb_port;             // 4CE
   power_t       interlock[MAX_INTERLOCKS_SET];  // 4D0 MAX_INTERLOCKS = MAX_RELAYS / 2
+  int8_t        shutter_tilt_config[5][MAX_SHUTTERS];  //508
+  int8_t        shutter_tilt_pos[MAX_SHUTTERS];        //51C
+  uint16_t      influxdb_period;           // 520
 
-  uint8_t       free_508[36];              // 508
+  uint8_t       free_522[10];              // 522
 
   uint16_t      mqtt_keepalive;            // 52C
   uint16_t      mqtt_socket_timeout;       // 52E
@@ -605,7 +617,7 @@ typedef struct {
   uint8_t       free_560[92];              // 560
 
   SysMBitfield1 flag2;                     // 5BC
-  unsigned long pulse_counter[MAX_COUNTERS];  // 5C0
+  uint32_t      pulse_counter[MAX_COUNTERS];  // 5C0
   uint16_t      pulse_counter_type;        // 5D0
   uint16_t      pulse_counter_debounce;    // 5D2
   uint8_t       rf_code[17][9];            // 5D4
@@ -631,9 +643,7 @@ typedef struct {
   mytmplt8285   ex_user_template8;         // 72F  14 bytes (ESP8266) - Free since 9.0.0.1
 #endif  // ESP8266
 #ifdef ESP32
-
   uint8_t       free_esp32_72f[14];        // 72F
-
 #endif  // ESP32
 
   uint8_t       novasds_startingoffset;    // 73D
@@ -645,12 +655,12 @@ typedef struct {
   EnergyUsage   energy_usage;              // 77C
   uint32_t      sensors[2][4];             // 794  Disable individual (0) sensor drivers / (1) GUI sensor output
   uint32_t      energy_kWhtotal_time;      // 7B4
-  unsigned long weight_item;               // 7B8  Weight of one item in gram * 10
+  uint32_t      weight_item;               // 7B8  Weight of one item in gram * 10
   uint16_t      ledmask;                   // 7BC
   uint16_t      weight_max;                // 7BE  Total max weight in kilogram
-  unsigned long weight_reference;          // 7C0  Reference weight in gram
-  unsigned long weight_calibration;        // 7C4
-  unsigned long energy_frequency_calibration;  // 7C8  Also used by HX711 to save last weight
+  uint32_t      weight_reference;          // 7C0  Reference weight in gram
+  uint32_t      weight_calibration;        // 7C4
+  uint32_t      energy_frequency_calibration;  // 7C8  Also used by HX711 to save last weight
   uint16_t      web_refresh;               // 7CC
   char          script_pram[5][10];        // 7CE
   char          rules[MAX_RULE_SETS][MAX_RULE_SIZE];  // 800  Uses 512 bytes in v5.12.0m, 3 x 512 bytes in v5.14.0b
@@ -679,8 +689,9 @@ typedef struct {
   uint8_t       weight_change;             // E9F
   uint8_t       web_color2[2][3];          // EA0  Needs to be on integer / 3 distance from web_color
 
-  uint8_t       free_ea6[33];              // EA6
+  uint8_t       free_ea6[32];              // EA6
 
+  uint8_t       shift595_device_count;     // EC6
   uint8_t       sta_config;                // EC7
   uint8_t       sta_active;                // EC8
   uint8_t       rule_stop;                 // EC9
@@ -732,12 +743,14 @@ typedef struct {
   uint8_t       shd_leading_edge;          // F5B
   uint16_t      shd_warmup_brightness;     // F5C
   uint8_t       shd_warmup_time;           // F5E
+  uint8_t       tcp_config;                // F5F
+  uint8_t       light_step_pixels;				 // F60
 
-  uint8_t       free_f5f[61];              // F5F - Decrement if adding new Setting variables just above and below
+  uint8_t       free_f59[59];              // F61 - Decrement if adding new Setting variables just above and below
 
   // Only 32 bit boundary variables below
 
-  unsigned long energy_kWhtotal;           // F9C
+  uint32_t      energy_kWhtotal;           // F9C
   SBitfield1    sbflag1;                   // FA0
   TeleinfoCfg   teleinfo;                  // FA4
   uint64_t      rf_protocol_mask;          // FA8
@@ -759,6 +772,8 @@ typedef struct {
   uint32_t      cfg_crc32;                 // FFC
 } TSettings;
 
+static_assert(sizeof(TSettings) == 4096, "TSettings Size is not correct");
+
 typedef struct {
   uint16_t      valid;                     // 280  (RTC memory offset 100 - sizeof(RTCRBT))
   uint8_t       fast_reboot_count;         // 282
@@ -773,19 +788,22 @@ typedef struct {
   uint16_t      valid;                     // 290  (RTC memory offset 100)
   uint8_t       oswatch_blocked_loop;      // 292
   uint8_t       ota_loader;                // 293
-  unsigned long energy_kWhtoday;           // 294
-  unsigned long energy_kWhtotal;           // 298
-  volatile unsigned long pulse_counter[MAX_COUNTERS];  // 29C - See #9521 why volatile
+  uint32_t      energy_kWhtoday;           // 294
+  uint32_t      energy_kWhtotal;           // 298
+  volatile uint32_t pulse_counter[MAX_COUNTERS];  // 29C - See #9521 why volatile
   power_t       power;                     // 2AC
   EnergyUsage   energy_usage;              // 2B0
-  unsigned long nextwakeup;                // 2C8
+  uint32_t      nextwakeup;                // 2C8
   uint32_t      baudrate;                  // 2CC
   uint32_t      ultradeepsleep;            // 2D0
   uint16_t      deepsleep_slip;            // 2D4
 
-  uint8_t       free_2d6[22];              // 2D6
+  uint8_t       free_2d6[2];               // 2D6
 
-                                           // 2EC - 2FF free locations
+  int32_t       energy_kWhtoday_ph[3];     // 2D8
+  int32_t       energy_kWhtotal_ph[3];     // 2E4
+
+                                           // 2F0 - 2FF free locations
 } TRtcSettings;
 TRtcSettings RtcSettings;
 #ifdef ESP32
@@ -802,8 +820,8 @@ struct TIME_T {
   char          name_of_month[4];
   uint16_t      day_of_year;
   uint16_t      year;
-  unsigned long days;
-  unsigned long valid;
+  uint32_t      days;
+  uint32_t      valid;
 } RtcTime;
 
 struct XDRVMAILBOX {

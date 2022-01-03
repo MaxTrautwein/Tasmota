@@ -1240,35 +1240,6 @@ void HandleRoot(void)
 #endif  // USE_SONOFF_IFAN
     WSContentSend_P(PSTR("</tr></table>"));
   }
-#ifdef USE_TUYA_MCU
-  if (IsModuleTuya()) {
-    if (AsModuleTuyaMS()) {
-      WSContentSend_P(HTTP_TABLE100);
-      WSContentSend_P(PSTR("<tr><div></div>"));
-      snprintf_P(stemp, sizeof(stemp), PSTR("" D_JSON_IRHVAC_MODE ""));
-      WSContentSend_P(HTTP_DEVICE_CONTROL, 26, TasmotaGlobal.devices_present + 1,
-        (strlen(SettingsText(SET_BUTTON1 + TasmotaGlobal.devices_present))) ? SettingsText(SET_BUTTON1 + TasmotaGlobal.devices_present) : stemp, "");
-      WSContentSend_P(PSTR("</tr></table>"));
-    }
-  }
-#endif  // USE_TUYA_MCU
-#ifdef USE_SONOFF_RF
-  if (SONOFF_BRIDGE == TasmotaGlobal.module_type) {
-    WSContentSend_P(HTTP_TABLE100);
-    WSContentSend_P(PSTR("<tr>"));
-    uint32_t idx = 0;
-    for (uint32_t i = 0; i < 4; i++) {
-      if (idx > 0) { WSContentSend_P(PSTR("</tr><tr>")); }
-      for (uint32_t j = 0; j < 4; j++) {
-        idx++;
-        snprintf_P(stemp, sizeof(stemp), PSTR("%d"), idx);
-        WSContentSend_P(PSTR("<td style='width:25%%'><button onclick='la(\"&k=%d\");'>%s</button></td>"), idx,  // &k is related to WebGetArg("k", tmp, sizeof(tmp));
-          (strlen(SettingsText(SET_BUTTON1 + idx -1))) ? SettingsText(SET_BUTTON1 + idx -1) : stemp);
-      }
-    }
-    WSContentSend_P(PSTR("</tr></table>"));
-  }
-#endif  // USE_SONOFF_RF
 
 #ifndef FIRMWARE_MINIMAL
   XdrvCall(FUNC_WEB_ADD_MAIN_BUTTON);
@@ -1405,13 +1376,6 @@ bool HandleRootStatusRefresh(void)
     }
   }
 #endif  // USE_SHUTTER
-#ifdef USE_SONOFF_RF
-  WebGetArg(PSTR("k"), tmp, sizeof(tmp));  // 1 - 16 Pre defined RF keys
-  if (strlen(tmp)) {
-    snprintf_P(svalue, sizeof(svalue), PSTR(D_CMND_RFKEY "%s"), tmp);
-    ExecuteWebCommand(svalue);
-  }
-#endif  // USE_SONOFF_RF
 #ifdef USE_ZIGBEE
   WebGetArg(PSTR("zbj"), tmp, sizeof(tmp));
   if (strlen(tmp)) {
@@ -1424,6 +1388,9 @@ bool HandleRootStatusRefresh(void)
     ExecuteWebCommand(svalue);
   }
 #endif // USE_ZIGBEE
+
+  XsnsCall(FUNC_WEB_GET_ARG);
+  XdrvCall(FUNC_WEB_GET_ARG);
 
 #ifdef USE_WEB_SSE
   WSContentBegin(200, CT_STREAM);
@@ -2439,8 +2406,7 @@ void HandleInformation(void)
   WSContentSend_P(PSTR("}1" D_PROGRAM_SIZE "}2%d kB"), ESP_getSketchSize() / 1024);
   WSContentSend_P(PSTR("}1" D_FREE_PROGRAM_SPACE "}2%d kB"), ESP.getFreeSketchSpace() / 1024);
 #ifdef ESP32
-  int32_t freeMaxMem = 100 - (int32_t)(ESP_getMaxAllocHeap() * 100 / ESP_getFreeHeap());
-  WSContentSend_PD(PSTR("}1" D_FREE_MEMORY "}2%1_f kB (" D_FRAGMENTATION " %d%%)"), &freemem, freeMaxMem);
+  WSContentSend_PD(PSTR("}1" D_FREE_MEMORY "}2%1_f kB (" D_FRAGMENTATION " %d%%)"), &freemem, ESP_getHeapFragmentation());
   if (UsePSRAM()) {
     WSContentSend_P(PSTR("}1" D_PSR_MAX_MEMORY "}2%d kB"), ESP.getPsramSize() / 1024);
     WSContentSend_P(PSTR("}1" D_PSR_FREE_MEMORY "}2%d kB"), ESP.getFreePsram() / 1024);
@@ -3098,14 +3064,75 @@ int WebSend(char *buffer)
       }
       url += F("cmnd=");                      // url = |http://192.168.178.86/cm?cmnd=| or |http://192.168.178.86/cm?user=admin&password=joker&cmnd=|
     }
-    url += command;                           // url = |http://192.168.178.86/cm?cmnd=POWER1 ON|
+    url += UrlEncode(command);                // url = |http://192.168.178.86/cm?cmnd=POWER1%20ON|
+    url += F(" GET");                         // url = |http://192.168.178.86/cm?cmnd=POWER1%20ON GET|
 
-    DEBUG_CORE_LOG(PSTR("WEB: Uri |%s|"), url.c_str());
+    DEBUG_CORE_LOG(PSTR("WEB: Uri '%s'"), url.c_str());
+    status = WebQuery(const_cast<char*>(url.c_str()));
+  }
+  return status;
+}
 
-    WiFiClient http_client;
-    HTTPClient http;
-    if (http.begin(http_client, UrlEncode(url))) {  // UrlEncode(url) = |http://192.168.178.86/cm?cmnd=POWER1%20ON|
-      int http_code = http.GET();             // Start connection and send HTTP header
+int WebQuery(char *buffer)
+{
+  // http://192.168.1.1/path GET                                         -> Sends HTTP GET http://192.168.1.1/path
+  // http://192.168.1.1/path POST {"some":"message"}                     -> Sends HTTP POST to http://192.168.1.1/path with body {"some":"message"}
+  // http://192.168.1.1/path PUT [Autorization: Bearer abcdxyz] potato   -> Sends HTTP PUT to http://192.168.1.1/path with authorization header and body "potato"
+  // http://192.168.1.1/path PATCH patchInfo                             -> Sends HTTP PATCH to http://192.168.1.1/path with body "potato"
+
+  // Valid HTTP Commands: GET, POST, PUT, and PATCH
+  // An unlimited number of headers can be sent per request, and a body can be sent for all command types
+  // The body will be ignored if sending a GET command
+
+#if defined(ESP32) && defined(USE_WEBCLIENT_HTTPS)
+  HTTPClientLight http;
+#else // HTTP only
+  WiFiClient http_client;
+  HTTPClient http;
+#endif
+
+  int status = WEBCMND_WRONG_PARAMETERS;
+
+  char *temp;
+  char *url = strtok_r(buffer, " ", &temp);
+  char *method = strtok_r(temp, " ", &temp);
+
+  if (url && method) {
+#if defined(ESP32) && defined(USE_WEBCLIENT_HTTPS)
+    if (http.begin(UrlEncode(url))) {
+#else // HTTP only
+    if (http.begin(http_client, UrlEncode(url))) {
+#endif
+      char empty_body[1] = { 0 };
+      char *body = empty_body;
+      if (temp) {                             // There is a body and/or header
+        if (temp[0] == '[') {                 // Header information was sent; decode it
+          temp += 1;
+          temp = strtok_r(temp, "]", &body);
+          bool headerFound = true;
+          while (headerFound) {
+            char *header = strtok_r(temp, ":", &temp);
+            if (header) {
+              char *headerBody = strtok_r(temp, "|", &temp);
+              if (headerBody) {
+                http.addHeader(header, headerBody);
+              }
+              else headerFound = false;
+            }
+            else headerFound = false;
+          }
+        } else {                              // No header information was sent, but there was a body
+          body = temp;
+        }
+      }
+
+      int http_code;
+      if (0 == strcasecmp_P(method, PSTR("GET"))) { http_code = http.GET(); }
+      else if (0 == strcasecmp_P(method, PSTR("POST"))) { http_code = http.POST(body); }
+      else if (0 == strcasecmp_P(method, PSTR("PUT"))) { http_code = http.PUT(body); }
+      else if (0 == strcasecmp_P(method, PSTR("PATCH"))) { http_code = http.PATCH(body); }
+      else return status;
+
       if (http_code > 0) {                    // http_code will be negative on error
         if (http_code == HTTP_CODE_OK || http_code == HTTP_CODE_MOVED_PERMANENTLY) {
 #ifdef USE_WEBSEND_RESPONSE
@@ -3125,7 +3152,7 @@ int WebSend(char *buffer)
           // recursive call must be possible in this case
           tasm_cmd_activ = 0;
 #endif  // USE_SCRIPT
-          MqttPublishPrefixTopicRulesProcess_P(RESULT_OR_STAT, PSTR(D_CMND_WEBSEND));
+          MqttPublishPrefixTopicRulesProcess_P(RESULT_OR_STAT, PSTR(D_CMND_WEBQUERY));
 #endif  // USE_WEBSEND_RESPONSE
         }
         status = WEBCMND_DONE;
@@ -3152,9 +3179,15 @@ int WebGetConfig(char *buffer)
 
   DEBUG_CORE_LOG(PSTR("WEB: Config Uri '%s'"), url.c_str());
 
+
+#if defined(ESP32) && defined(USE_WEBCLIENT_HTTPS)
+  HTTPClientLight http;
+  if (http.begin(UrlEncode(url))) {  // UrlEncode(url) = |http://192.168.178.86/cm?cmnd=POWER1%20ON|
+#else // HTTP only
   WiFiClient http_client;
   HTTPClient http;
   if (http.begin(http_client, UrlEncode(url))) {  // UrlEncode(url) = |http://192.168.178.86/cm?cmnd=POWER1%20ON|
+#endif
     int http_code = http.GET();             // Start connection and send HTTP header
     if (http_code > 0) {                    // http_code will be negative on error
       status = WEBCMND_DONE;
@@ -3240,8 +3273,8 @@ const char kWebCommands[] PROGMEM = "|"  // No prefix
 #if defined(USE_SENDMAIL) || defined(USE_ESP32MAIL)
   D_CMND_SENDMAIL "|"
 #endif
-  D_CMND_WEBSERVER "|" D_CMND_WEBPASSWORD "|" D_CMND_WEBLOG "|" D_CMND_WEBREFRESH "|" D_CMND_WEBSEND "|" D_CMND_WEBCOLOR "|"
-  D_CMND_WEBSENSOR "|" D_CMND_WEBBUTTON
+  D_CMND_WEBSERVER "|" D_CMND_WEBPASSWORD "|" D_CMND_WEBLOG "|" D_CMND_WEBREFRESH "|" D_CMND_WEBSEND "|" D_CMND_WEBQUERY "|"
+  D_CMND_WEBCOLOR "|" D_CMND_WEBSENSOR "|" D_CMND_WEBBUTTON
 #ifdef USE_WEBGETCONFIG
   "|" D_CMND_WEBGETCONFIG
 #endif
@@ -3257,8 +3290,8 @@ void (* const WebCommand[])(void) PROGMEM = {
 #if defined(USE_SENDMAIL) || defined(USE_ESP32MAIL)
   &CmndSendmail,
 #endif
-  &CmndWebServer, &CmndWebPassword, &CmndWeblog, &CmndWebRefresh, &CmndWebSend, &CmndWebColor,
-  &CmndWebSensor, &CmndWebButton
+  &CmndWebServer, &CmndWebPassword, &CmndWeblog, &CmndWebRefresh, &CmndWebSend, &CmndWebQuery,
+  &CmndWebColor, &CmndWebSensor, &CmndWebButton
 #ifdef USE_WEBGETCONFIG
   , &CmndWebGetConfig
 #endif
@@ -3354,6 +3387,15 @@ void CmndWebSend(void)
 {
   if (XdrvMailbox.data_len > 0) {
     uint32_t result = WebSend(XdrvMailbox.data);
+    char stemp1[20];
+    ResponseCmndChar(GetTextIndexed(stemp1, sizeof(stemp1), result, kWebCmndStatus));
+  }
+}
+
+void CmndWebQuery(void)
+{
+  if (XdrvMailbox.data_len > 0) {
+    uint32_t result = WebQuery(XdrvMailbox.data);
     char stemp1[20];
     ResponseCmndChar(GetTextIndexed(stemp1, sizeof(stemp1), result, kWebCmndStatus));
   }

@@ -268,10 +268,10 @@ void HandleMetrics(void) {
     Energy.active_power[0], Settings->flag2.wattage_resolution, nullptr);
   WritePromMetricDec(PSTR("energy_power_kilowatts_daily"),
     kPromMetricCounter,
-    Energy.daily, Settings->flag2.energy_resolution, nullptr);
+    Energy.daily_sum, Settings->flag2.energy_resolution, nullptr);
   WritePromMetricDec(PSTR("energy_power_kilowatts_total"),
     kPromMetricCounter,
-    Energy.total, Settings->flag2.energy_resolution, nullptr);
+    Energy.total_sum, Settings->flag2.energy_resolution, nullptr);
 #endif
 
   for (uint32_t device = 0; device < TasmotaGlobal.devices_present; device++) {
@@ -282,7 +282,7 @@ void HandleMetrics(void) {
   }
 
   ResponseClear();
-  MqttShowSensor(); //Pull sensor data
+  MqttShowSensor(true); //Pull sensor data
   String jsonStr = ResponseData();
   JsonParser parser((char *)jsonStr.c_str());
   JsonParserObject root = parser.getRootObject();

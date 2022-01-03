@@ -172,6 +172,11 @@ enum UserSelectablePins {
   GPIO_MCP2515_CS,                     // MCP2515 Chip Select
   GPIO_HRG15_TX, GPIO_HRG15_RX,        // Hydreon RG-15 rain sensor serial interface
   GPIO_VINDRIKTNING_RX,                // IKEA VINDRIKTNING Serial interface
+  GPIO_BL0939_RX,                      // BL0939 Serial interface (Dual R3 v2)
+  GPIO_BL0942_RX,                      // BL0942 Serial interface
+  GPIO_HM330X_SET,                     // HM330X SET pin (sleep when low)
+  GPIO_HEARTBEAT, GPIO_HEARTBEAT_INV,
+  GPIO_SHIFT595_SRCLK, GPIO_SHIFT595_RCLK, GPIO_SHIFT595_OE, GPIO_SHIFT595_SER,   // 74x595 Shift register
   GPIO_SENSOR_END };
 
 enum ProgramSelectablePins {
@@ -363,8 +368,14 @@ const char kSensorNames[] PROGMEM =
   D_SENSOR_INTERRUPT "|"
   D_SENSOR_MCP2515_CS "|"
   D_SENSOR_HRG15_TX "|" D_SENSOR_HRG15_RX "|"
-  D_SENSOR_VINDRIKTNING_RX
-  ;
+  D_SENSOR_VINDRIKTNING_RX "|"
+  D_SENSOR_BL0939_RX "|"
+  D_SENSOR_BL0942_RX "|"
+  D_SENSOR_HM330X_SET "|"
+  D_SENSOR_HEARTBEAT "|" D_SENSOR_HEARTBEAT "_i|"
+
+  D_GPIO_SHIFT595_SRCLK "|" D_GPIO_SHIFT595_RCLK "|" D_GPIO_SHIFT595_OE "|" D_GPIO_SHIFT595_SER "|"
+;
 
 const char kSensorNamesFixed[] PROGMEM =
   D_SENSOR_USER;
@@ -422,6 +433,8 @@ const uint16_t kGpioNiceList[] PROGMEM = {
 #endif
   AGPIO(GPIO_OUTPUT_HI),                // Fixed output high
   AGPIO(GPIO_OUTPUT_LO),                // Fixed output low
+  AGPIO(GPIO_HEARTBEAT),                 // Every second pulsed high
+  AGPIO(GPIO_HEARTBEAT_INV),             // Every second pulsed low
 #ifdef USE_FTC532
   AGPIO(GPIO_FTC532),                   // FTC532 touch input
 #endif
@@ -510,6 +523,15 @@ const uint16_t kGpioNiceList[] PROGMEM = {
   AGPIO(GPIO_SSD1331_CS),
   AGPIO(GPIO_SSD1331_DC),
 #endif  // USE_DISPLAY_SSD1331
+
+#ifdef USE_DISPLAY_MAX7219_MATRIX
+  #undef USE_DISPLAY_MAX7219
+  #undef USE_DISPLAY_TM1637
+  AGPIO(GPIO_MAX7219CLK),
+  AGPIO(GPIO_MAX7219DIN),
+  AGPIO(GPIO_MAX7219CS),
+#endif  // USE_DISPLAY_MAX7219_MATRIX
+
 #ifdef USE_DISPLAY_TM1637
   AGPIO(GPIO_TM1637CLK),
   AGPIO(GPIO_TM1637DIO),
@@ -559,7 +581,7 @@ const uint16_t kGpioNiceList[] PROGMEM = {
   AGPIO(GPIO_P9813_CLK),      // P9813 CLOCK
   AGPIO(GPIO_P9813_DAT),      // P9813 DATA
 #else
-  AGPIO(GPIO_WS2812),         // WS2812 Led string
+  AGPIO(GPIO_WS2812) + MAX_RMT,// WS2812 Led string, using RMT on ESP32
 #endif  // NEO_HW_P9813
 #endif
 #ifdef USE_ARILUX_RF
@@ -694,8 +716,10 @@ const uint16_t kGpioNiceList[] PROGMEM = {
   AGPIO(GPIO_LE01MR_TX),     // F7F LE-01MR energy meter tx pin
   AGPIO(GPIO_LE01MR_RX),     // F7F LE-01MR energy meter rx pin
 #endif // IFDEF:USE_LE01MR
-#ifdef USE_BL0940
+#if defined(USE_BL0940) || defined(USE_BL09XX)
+  AGPIO(GPIO_BL0939_RX),     // BL0939 Serial interface (Dual R3 v2)
   AGPIO(GPIO_BL0940_RX),     // BL0940 Serial interface
+  AGPIO(GPIO_BL0942_RX),     // BL0940 Serial interface
 #endif
 #ifdef USE_IEM3000
   AGPIO(GPIO_IEM3000_TX),    // IEM3000 Serial interface
@@ -749,6 +773,12 @@ const uint16_t kGpioNiceList[] PROGMEM = {
   AGPIO(GPIO_PMS5003_TX),     // Plantower PMS5003 Serial interface
   AGPIO(GPIO_PMS5003_RX),     // Plantower PMS5003 Serial interface
 #endif
+#ifdef USE_VINDRIKTNING
+  AGPIO(GPIO_VINDRIKTNING_RX),
+#endif
+#ifdef USE_HM330X
+  AGPIO(GPIO_HM330X_SET),     // HM330X Sleep pin (active low)
+#endif
 #if defined(USE_TX20_WIND_SENSOR) || defined(USE_TX23_WIND_SENSOR) || defined(USE_WS2300_WIND_SENSOR)
   AGPIO(GPIO_TX2X_TXD_BLACK), // TX20/TX23 Transmission Pin
 #endif
@@ -798,9 +828,6 @@ const uint16_t kGpioNiceList[] PROGMEM = {
 #ifdef USE_HRG15
   AGPIO(GPIO_HRG15_TX),
   AGPIO(GPIO_HRG15_RX),
-#endif
-#ifdef USE_VINDRIKTNING
-  AGPIO(GPIO_VINDRIKTNING_RX),
 #endif
 
 /*-------------------------------------------------------------------------------------------*\
@@ -915,6 +942,13 @@ const uint16_t kGpioNiceList[] PROGMEM = {
   AGPIO(GPIO_ADC_JOY) + MAX_ADCS,         // Joystick
   AGPIO(GPIO_ADC_PH) + MAX_ADCS,          // Analog PH Sensor
 #endif  // ESP32
+
+#ifdef USE_SHIFT595
+  AGPIO(GPIO_SHIFT595_SRCLK),            // 74x595 shift register
+  AGPIO(GPIO_SHIFT595_RCLK),
+  AGPIO(GPIO_SHIFT595_OE),
+  AGPIO(GPIO_SHIFT595_SER),
+#endif
 };
 
 /*-------------------------------------------------------------------------------------------*\
@@ -1061,11 +1095,11 @@ const char PINS_WEMOS[] PROGMEM = "IOTXIORXIOIOFLFLFLFLFLFLIOIOIOIOIOIOIOIOIOIOI
 
 typedef struct MYIO {
   uint16_t      io[MAX_GPIO_PIN];
-} myio;                         // ESP8266: 18 * 2 = 36 bytes / ESP32: 40 * 2 = 80 bytes / ESP32-C3: 22 * 2 = 44 bytes
+} myio;                         // ESP8266: 18*2 = 36 bytes / ESP32: 40*2 = 80 bytes / ESP32-C3: 22*2 = 44 bytes / ESP32-S2: 47*2 = 94 bytes
 
 typedef struct MYCFGIO {
   uint16_t      io[MAX_USER_PINS];
-} mycfgio;                      // ESP8266: 14 * 2 = 28 bytes / ESP32: 36 * 2 = 72 bytes / ESP32-C3: 22 * 2 = 44 bytes
+} mycfgio;                      // ESP8266: 14*2 = 28 bytes / ESP32: 36*2 = 72 bytes / ESP32-C3: 22*2 = 44 bytes / ESP32-S2: 36*2 = 72 bytes
 
 #define GPIO_FLAG_USED       0  // Currently no flags used
 
@@ -1092,9 +1126,9 @@ typedef union {
 } gpio_flag;                    // 2 bytes
 
 typedef struct MYTMPLT {
-  mycfgio      gp;              // 28 / 72 / 44 bytes
+  mycfgio      gp;              // 28 / 72 / 44 / 72 bytes
   gpio_flag    flag;            // 2 bytes
-} mytmplt;                      // 30 / 74 / 46 bytes
+} mytmplt;                      // 30 / 74 / 46 / 74 bytes
 
 //********************************************************************************************
 

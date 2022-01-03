@@ -65,7 +65,7 @@ void (* const TasmotaCommand[])(void) PROGMEM = {
   &CmndTimeDst, &CmndAltitude, &CmndLedPower, &CmndLedState, &CmndLedMask, &CmndLedPwmOn, &CmndLedPwmOff, &CmndLedPwmMode,
   &CmndWifiPower, &CmndTempOffset, &CmndHumOffset, &CmndSpeedUnit, &CmndGlobalTemp, &CmndGlobalHum, &CmndSwitchText,
 #ifdef USE_I2C
-  &CmndI2cScan, CmndI2cDriver,
+  &CmndI2cScan, &CmndI2cDriver,
 #endif
 #ifdef USE_DEVICE_GROUPS
   &CmndDevGroupName,
@@ -93,6 +93,10 @@ void ResponseCmndNumber(int value) {
 
 void ResponseCmndFloat(float value, uint32_t decimals) {
   Response_P(PSTR("{\"%s\":%*_f}"), XdrvMailbox.command, decimals, &value);  // Return float value without quotes
+}
+
+void ResponseCmndIdxFloat(float value, uint32_t decimals) {
+  Response_P(PSTR("{\"%s%d\":%*_f}"), XdrvMailbox.command, XdrvMailbox.index, decimals, &value);  // Return float value without quotes
 }
 
 void ResponseCmndIdxNumber(int value) {
@@ -619,7 +623,7 @@ void CmndStatus(void)
 
   if ((0 == payload) || (8 == payload) || (10 == payload)) {
     Response_P(PSTR("{\"" D_CMND_STATUS D_STATUS10_SENSOR "\":"));
-    MqttShowSensor();
+    MqttShowSensor(true);
     ResponseJsonEnd();
     CmndStatusResponse((8 == payload) ? 8 : 10);
   }
@@ -910,7 +914,7 @@ bool SetoptionDecode(uint32_t index, uint32_t *ptype, uint32_t *pindex) {
       *ptype = 4;
       *pindex = index -82;      // 0 .. 31
     }
-    else {                                 // SetOption114 .. 145 = Settings->flag5
+    else {                      // SetOption114 .. 145 = Settings->flag5
       *ptype = 5;
       *pindex = index -114;     // 0 .. 31
     }
@@ -1065,6 +1069,9 @@ void CmndSetoptionBase(bool indexed) {
                 if (0 == XdrvMailbox.payload) {
                   TasmotaGlobal.restart_flag = 2;
                 }
+                break;
+              case 18:                     // SetOption132 - TLS Fingerprint
+                TasmotaGlobal.restart_flag = 2;
                 break;
             }
           }
@@ -1452,6 +1459,10 @@ void CmndPwmfrequency(void)
   if ((1 == XdrvMailbox.payload) || ((XdrvMailbox.payload >= PWM_MIN) && (XdrvMailbox.payload <= PWM_MAX))) {
     Settings->pwm_frequency = (1 == XdrvMailbox.payload) ? PWM_FREQ : XdrvMailbox.payload;
     analogWriteFreq(Settings->pwm_frequency);   // Default is 1000 (core_esp8266_wiring_pwm.c)
+#ifdef USE_LIGHT
+    LightReapplyColor();
+    LightAnimate();
+#endif // USE_LIGHT
   }
   ResponseCmndNumber(Settings->pwm_frequency);
 }
@@ -1519,28 +1530,8 @@ void CmndSerialConfig(void)
       }
     }
     else if ((XdrvMailbox.payload >= 5) && (XdrvMailbox.payload <= 8)) {
-      uint8_t serial_config = XdrvMailbox.payload -5;  // Data bits 5, 6, 7 or 8, No parity and 1 stop bit
-
-      bool valid = true;
-      char parity = (XdrvMailbox.data[1] & 0xdf);
-      if ('E' == parity) {
-        serial_config += 0x08;                         // Even parity
-      }
-      else if ('O' == parity) {
-        serial_config += 0x10;                         // Odd parity
-      }
-      else if ('N' != parity) {
-        valid = false;
-      }
-
-      if ('2' == XdrvMailbox.data[2]) {
-        serial_config += 0x04;                         // Stop bits 2
-      }
-      else if ('1' != XdrvMailbox.data[2]) {
-        valid = false;
-      }
-
-      if (valid) {
+      int8_t serial_config = ParseSerialConfig(XdrvMailbox.data);
+      if (serial_config >= 0) {
         SetSerialConfig(serial_config);
       }
     }

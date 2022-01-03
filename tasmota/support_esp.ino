@@ -103,6 +103,19 @@ String GetDeviceHardware(void) {
 
 #ifdef ESP32
 
+// ESP32_ARCH contains the name of the architecture (used by autoconf)
+#if CONFIG_IDF_TARGET_ESP32
+  #define ESP32_ARCH              "esp32"
+#elif CONFIG_IDF_TARGET_ESP32S2
+  #define ESP32_ARCH              "esp32s2"
+#elif CONFIG_IDF_TARGET_ESP32S3
+  #define ESP32_ARCH              "esp32s3"
+#elif CONFIG_IDF_TARGET_ESP32C3
+  #define ESP32_ARCH              "esp32c3"
+#else
+  #define ESP32_ARCH              ""
+#endif
+
 // Handle 20k of NVM
 
 #include <nvs.h>
@@ -124,34 +137,43 @@ String GetDeviceHardware(void) {
 
 #include <esp_phy_init.h>
 
-void NvmLoad(const char *sNvsName, const char *sName, void *pSettings, unsigned nSettingsLen) {
-  nvs_handle handle;
-  noInterrupts();
-  nvs_open(sNvsName, NVS_READONLY, &handle);
+bool NvmLoad(const char *sNvsName, const char *sName, void *pSettings, unsigned nSettingsLen) {
+  nvs_handle_t handle;
+  esp_err_t result = nvs_open(sNvsName, NVS_READONLY, &handle);
+  if (result != ESP_OK) {
+    AddLog(LOG_LEVEL_DEBUG, PSTR("NVS: Error %d"), result);
+    return false;
+  }
   size_t size = nSettingsLen;
   nvs_get_blob(handle, sName, pSettings, &size);
   nvs_close(handle);
-  interrupts();
+  return true;
 }
 
 void NvmSave(const char *sNvsName, const char *sName, const void *pSettings, unsigned nSettingsLen) {
-  nvs_handle handle;
-  noInterrupts();
-  nvs_open(sNvsName, NVS_READWRITE, &handle);
-  nvs_set_blob(handle, sName, pSettings, nSettingsLen);
-  nvs_commit(handle);
-  nvs_close(handle);
-  interrupts();
+#ifdef USE_WEBCAM
+  WcInterrupt(0);  // Stop stream if active to fix TG1WDT_SYS_RESET
+#endif
+  nvs_handle_t handle;
+  esp_err_t result = nvs_open(sNvsName, NVS_READWRITE, &handle);
+  if (result != ESP_OK) {
+    AddLog(LOG_LEVEL_DEBUG, PSTR("NVS: Error %d"), result);
+  } else {
+    nvs_set_blob(handle, sName, pSettings, nSettingsLen);
+    nvs_commit(handle);
+    nvs_close(handle);
+  }
+#ifdef USE_WEBCAM
+  WcInterrupt(1);
+#endif
 }
 
 int32_t NvmErase(const char *sNvsName) {
-  nvs_handle handle;
-  noInterrupts();
+  nvs_handle_t handle;
   int32_t result = nvs_open(sNvsName, NVS_READWRITE, &handle);
   if (ESP_OK == result) { result = nvs_erase_all(handle); }
   if (ESP_OK == result) { result = nvs_commit(handle); }
   nvs_close(handle);
-  interrupts();
   return result;
 }
 
@@ -195,16 +217,15 @@ void SettingsErase(uint8_t type) {
 }
 
 uint32_t SettingsRead(void *data, size_t size) {
-  uint32_t source = 1;
 #ifdef USE_UFILESYS
-  if (!TfsLoadFile(TASM_FILE_SETTINGS, (uint8_t*)data, size)) {
-#endif
-    source = 0;
-    NvmLoad("main", "Settings", data, size);
-#ifdef USE_UFILESYS
+  if (TfsLoadFile(TASM_FILE_SETTINGS, (uint8_t*)data, size)) {
+    return 2;
   }
 #endif
-  return source;
+  if (NvmLoad("main", "Settings", data, size)) {
+    return 1;
+  };
+  return 0;
 }
 
 void SettingsWrite(const void *pSettings, unsigned nSettingsLen) {
@@ -311,44 +332,6 @@ int32_t EspPartitionMmap(uint32_t action) {
 }
 
 */
-//
-// Crash stuff
-//
-
-void CrashDump(void) {
-}
-
-bool CrashFlag(void) {
-  return false;
-}
-
-void CrashDumpClear(void) {
-}
-
-void CmndCrash(void) {
-  /*
-  volatile uint32_t dummy;
-  dummy = *((uint32_t*) 0x00000000);
-*/
-}
-
-// Do an infinite loop to trigger WDT watchdog
-void CmndWDT(void) {
-  /*
-  volatile uint32_t dummy = 0;
-  while (1) {
-    dummy++;
-  }
-*/
-}
-// This will trigger the os watch after OSWATCH_RESET_TIME (=120) seconds
-void CmndBlockedLoop(void) {
-  /*
-  while (1) {
-    delay(1000);
-  }
-*/
-}
 
 //
 // ESP32 specific
@@ -425,14 +408,21 @@ uint32_t ESP_getSketchSize(void) {
 }
 
 uint32_t ESP_getFreeHeap(void) {
-  return ESP.getFreeHeap();
+  // ESP_getFreeHeap() returns also IRAM which we don't use
+  return heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
 }
 
 uint32_t ESP_getMaxAllocHeap(void) {
-  // largest block of heap that can be allocated at once
-  uint32_t free_block_size = ESP.getMaxAllocHeap();
+  // arduino returns IRAM but we want only DRAM
+  uint32_t free_block_size = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
   if (free_block_size > 100) { free_block_size -= 100; }
   return free_block_size;
+}
+
+int32_t ESP_getHeapFragmentation(void) {
+  int32_t free_maxmem = 100 - (int32_t)(ESP_getMaxAllocHeap() * 100 / ESP_getFreeHeap());
+  if (free_maxmem < 0) { free_maxmem = 0; }
+  return free_maxmem;
 }
 
 void ESP_Restart(void) {
@@ -510,6 +500,12 @@ void *special_calloc(size_t num, size_t size) {
 float CpuTemperature(void) {
 #ifdef CONFIG_IDF_TARGET_ESP32
   return (float)temperatureRead();  // In Celsius
+/*
+  // These jumps are not stable either. Sometimes it jumps to 77.3
+  float t = (float)temperatureRead();  // In Celsius
+  if (t > 81) { t = t - 27.2; }        // Fix temp jump observed on some ESP32 like DualR3
+  return t;
+*/
 #else
   // Currently (20210801) repeated calls to temperatureRead() on ESP32C3 and ESP32S2 result in IDF error messages
   static float t = NAN;
@@ -519,6 +515,39 @@ float CpuTemperature(void) {
   return t;
 #endif
 }
+
+/*
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+uint8_t temprature_sens_read();
+
+#ifdef __cplusplus
+}
+#endif
+
+#ifdef CONFIG_IDF_TARGET_ESP32
+uint8_t temprature_sens_read();
+
+float CpuTemperature(void) {
+  uint8_t t = temprature_sens_read();
+
+  AddLog(LOG_LEVEL_DEBUG, PSTR("TMP: value %d"), t);
+
+  return (t - 32) / 1.8;
+}
+#else
+float CpuTemperature(void) {
+  // Currently (20210801) repeated calls to temperatureRead() on ESP32C3 and ESP32S2 result in IDF error messages
+  static float t = NAN;
+  if (isnan(t)) {
+    t = (float)temperatureRead();  // In Celsius
+  }
+  return t;
+}
+#endif
+*/
 
 /*
 #if CONFIG_IDF_TARGET_ESP32S2

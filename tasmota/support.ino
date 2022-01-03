@@ -21,10 +21,15 @@ extern "C" {
 extern struct rst_info resetInfo;
 }
 
+#ifdef USE_KNX
+bool knx_started = false;
+#endif  // USE_KNX
+
 /*********************************************************************************************\
  * Watchdog extension (https://github.com/esp8266/Arduino/issues/1532)
 \*********************************************************************************************/
 
+#ifdef ESP8266
 #include <Ticker.h>
 
 Ticker tickerOSWatch;
@@ -38,12 +43,7 @@ uint8_t oswatch_blocked_loop = 0;
 //void OsWatchTicker() IRAM_ATTR;
 #endif  // USE_WS2812_DMA
 
-#ifdef USE_KNX
-bool knx_started = false;
-#endif  // USE_KNX
-
-void OsWatchTicker(void)
-{
+void OsWatchTicker(void) {
   uint32_t t = millis();
   uint32_t last_run = t - oswatch_last_loop_time;
 
@@ -66,27 +66,33 @@ void OsWatchTicker(void)
   }
 }
 
-void OsWatchInit(void)
-{
+void OsWatchInit(void) {
   oswatch_blocked_loop = RtcSettings.oswatch_blocked_loop;
   RtcSettings.oswatch_blocked_loop = 0;
   oswatch_last_loop_time = millis();
   tickerOSWatch.attach_ms(((OSWATCH_RESET_TIME / 3) * 1000), OsWatchTicker);
 }
 
-void OsWatchLoop(void)
-{
+void OsWatchLoop(void) {
   oswatch_last_loop_time = millis();
 //  while(1) delay(1000);  // this will trigger the os watch
 }
 
-bool OsWatchBlockedLoop(void)
-{
+bool OsWatchBlockedLoop(void) {
   return oswatch_blocked_loop;
 }
 
-uint32_t ResetReason(void)
-{
+#else  // Anything except ESP8266
+
+void OsWatchInit(void) {}
+void OsWatchLoop(void) {}
+bool OsWatchBlockedLoop(void) {
+  return false;
+}
+
+#endif  // ESP8266
+
+uint32_t ResetReason(void) {
   /*
     user_interface.h
     REASON_DEFAULT_RST      = 0,  // "Power on"                normal startup by power on
@@ -100,9 +106,8 @@ uint32_t ResetReason(void)
   return ESP_ResetInfoReason();
 }
 
-String GetResetReason(void)
-{
-  if (oswatch_blocked_loop) {
+String GetResetReason(void) {
+  if (OsWatchBlockedLoop()) {
     char buff[32];
     strncpy_P(buff, PSTR(D_JSON_BLOCKED_LOOP), sizeof(buff));
     return String(buff);
@@ -154,9 +159,9 @@ TasAutoMutex::TasAutoMutex(SemaphoreHandle_t*mutex, const char *name, int maxWai
     this->name = name;
     if (take) {
       this->taken = xSemaphoreTakeRecursive(this->mutex, this->maxWait);
-      if (!this->taken){
-        Serial.printf("\r\nMutexfail %s\r\n", this->name);
-      }
+//      if (!this->taken){
+//        Serial.printf("\r\nMutexfail %s\r\n", this->name);
+//      }
     }
   } else {
     this->mutex = (SemaphoreHandle_t)nullptr;
@@ -192,9 +197,9 @@ void TasAutoMutex::take() {
   if (this->mutex) {
     if (!this->taken) {
       this->taken = xSemaphoreTakeRecursive(this->mutex, this->maxWait);
-      if (!this->taken){
-        Serial.printf("\r\nMutexfail %s\r\n", this->name);
-      }
+//      if (!this->taken){
+//        Serial.printf("\r\nMutexfail %s\r\n", this->name);
+//      }
     }
   }
 }
@@ -671,9 +676,8 @@ bool ParseIPv4(uint32_t* addr, const char* str_p)
   return (3 == i);
 }
 
-// Function to parse & check if version_str is newer than our currently installed version.
-bool NewerVersion(char* version_str)
-{
+bool NewerVersion(char* version_str) {
+  // Function to parse & check if version_str is newer than our currently installed version.
   uint32_t version = 0;
   uint32_t i = 0;
   char *str_ptr;
@@ -683,20 +687,19 @@ bool NewerVersion(char* version_str)
   // Loop through the version string, splitting on '.' seperators.
   for (char *str = strtok_r(version_dup, ".", &str_ptr); str && i < sizeof(VERSION); str = strtok_r(nullptr, ".", &str_ptr), i++) {
     int field = atoi(str);
-    // The fields in a version string can only range from 0-255.
-    if ((field < 0) || (field > 255)) {
-      return false;
-    }
-    // Shuffle the accumulated bytes across, and add the new byte.
-    version = (version << 8) + field;
-    // Check alpha delimiter after 1.2.3 only
-    if ((2 == i) && isalpha(str[strlen(str)-1])) {
-      field = str[strlen(str)-1] & 0x1f;
-      version = (version << 8) + field;
+    if ((0 == i) && (field > 2021) && (field < 2099)) {    // New versions look like 2022.01.1
+      version = ((field / 100) << 8) + (field - 2000);
       i++;
+    } else {
+      // The fields in a version string can only range from 0-255.
+      if ((field < 0) || (field > 255)) {                  // Old version look like 10.1.0.1
+        return false;
+      }
+      // Shuffle the accumulated bytes across, and add the new byte.
+      version = (version << 8) + field;
     }
   }
-  // A version string should have 2-4 fields. e.g. 1.2, 1.2.3, or 1.2.3a (= 1.2.3.1).
+  // A version string should have 2-4 fields. e.g. 1.2, 1.2.3, or 1.2.3.1 (Now 2022.01 or 2022.01.1)
   // If not, then don't consider it a valid version string.
   if ((i < 2) || (i > sizeof(VERSION))) {
     return false;
@@ -979,115 +982,6 @@ int GetStateNumber(const char *state_text)
     state_number = pgm_read_byte(sNumbers + state_number);
   }
   return state_number;
-}
-
-String GetSerialConfig(void) {
-  // Settings->serial_config layout
-  // b000000xx - 5, 6, 7 or 8 data bits
-  // b00000x00 - 1 or 2 stop bits
-  // b000xx000 - None, Even or Odd parity
-
-  const static char kParity[] PROGMEM = "NEOI";
-
-  char config[4];
-  config[0] = '5' + (Settings->serial_config & 0x3);
-  config[1] = pgm_read_byte(&kParity[(Settings->serial_config >> 3) & 0x3]);
-  config[2] = '1' + ((Settings->serial_config >> 2) & 0x1);
-  config[3] = '\0';
-  return String(config);
-}
-
-#if defined(ESP32) && CONFIG_IDF_TARGET_ESP32C3
-// temporary workaround, see https://github.com/espressif/arduino-esp32/issues/5287
-#include <driver/uart.h>
-uint32_t GetSerialBaudrate(void) {
-  uint32_t br;
-  uart_get_baudrate(0, &br);
-  return (br / 300) * 300;  // Fix ESP32 strange results like 115201
-}
-#else
-uint32_t GetSerialBaudrate(void) {
-  return (Serial.baudRate() / 300) * 300;  // Fix ESP32 strange results like 115201
-}
-#endif
-
-void SetSerialBegin(void) {
-  TasmotaGlobal.baudrate = Settings->baudrate * 300;
-  AddLog(LOG_LEVEL_INFO, PSTR(D_LOG_SERIAL "Set to %s %d bit/s"), GetSerialConfig().c_str(), TasmotaGlobal.baudrate);
-  Serial.flush();
-#ifdef ESP8266
-  Serial.begin(TasmotaGlobal.baudrate, (SerialConfig)pgm_read_byte(kTasmotaSerialConfig + Settings->serial_config));
-#endif  // ESP8266
-#ifdef ESP32
-  delay(10);  // Allow time to cleanup queues - if not used hangs ESP32
-  Serial.end();
-  delay(10);  // Allow time to cleanup queues - if not used hangs ESP32
-  uint32_t config = pgm_read_dword(kTasmotaSerialConfig + Settings->serial_config);
-  Serial.begin(TasmotaGlobal.baudrate, config);
-#endif  // ESP32
-}
-
-void SetSerialConfig(uint32_t serial_config) {
-  if (serial_config > TS_SERIAL_8O2) {
-    serial_config = TS_SERIAL_8N1;
-  }
-  if (serial_config != Settings->serial_config) {
-    Settings->serial_config = serial_config;
-    SetSerialBegin();
-  }
-}
-
-void SetSerialBaudrate(uint32_t baudrate) {
-  TasmotaGlobal.baudrate = baudrate;
-  Settings->baudrate = TasmotaGlobal.baudrate / 300;
-  if (GetSerialBaudrate() != TasmotaGlobal.baudrate) {
-    SetSerialBegin();
-  }
-}
-
-void SetSerial(uint32_t baudrate, uint32_t serial_config) {
-  Settings->flag.mqtt_serial = 0;  // CMND_SERIALSEND and CMND_SERIALLOG
-  Settings->serial_config = serial_config;
-  TasmotaGlobal.baudrate = baudrate;
-  Settings->baudrate = TasmotaGlobal.baudrate / 300;
-  SetSeriallog(LOG_LEVEL_NONE);
-  SetSerialBegin();
-}
-
-void ClaimSerial(void) {
-  TasmotaGlobal.serial_local = true;
-  AddLog(LOG_LEVEL_INFO, PSTR("SNS: Hardware Serial"));
-  SetSeriallog(LOG_LEVEL_NONE);
-  TasmotaGlobal.baudrate = GetSerialBaudrate();
-  Settings->baudrate = TasmotaGlobal.baudrate / 300;
-}
-
-void SerialSendRaw(char *codes)
-{
-  char *p;
-  char stemp[3];
-  uint8_t code;
-
-  int size = strlen(codes);
-
-  while (size > 1) {
-    strlcpy(stemp, codes, sizeof(stemp));
-    code = strtol(stemp, &p, 16);
-    Serial.write(code);
-    size -= 2;
-    codes += 2;
-  }
-}
-
-// values is a comma-delimited string: e.g. "72,101,108,108,111,32,87,111,114,108,100,33,10"
-void SerialSendDecimal(char *values)
-{
-  char *p;
-  uint8_t code;
-  for (char* str = strtok_r(values, ",", &p); str; str = strtok_r(nullptr, ",", &p)) {
-    code = (uint8_t)atoi(str);
-    Serial.write(code);
-  }
 }
 
 uint32_t GetHash(const char *buffer, size_t size)
@@ -1895,6 +1789,175 @@ uint32_t JsonParsePath(JsonParserObject *jobj, const char *spath, char delim, fl
 #endif // USE_SCRIPT
 
 /*********************************************************************************************\
+ * Serial
+\*********************************************************************************************/
+
+String GetSerialConfig(uint8_t serial_config) {
+  // Settings->serial_config layout
+  // b000000xx - 5, 6, 7 or 8 data bits
+  // b00000x00 - 1 or 2 stop bits
+  // b000xx000 - None, Even or Odd parity
+
+  const static char kParity[] PROGMEM = "NEOI";
+
+  char config[4];
+  config[0] = '5' + (serial_config & 0x3);
+  config[1] = pgm_read_byte(&kParity[(serial_config >> 3) & 0x3]);
+  config[2] = '1' + ((serial_config >> 2) & 0x1);
+  config[3] = '\0';
+  return String(config);
+}
+
+String GetSerialConfig(void) {
+  return GetSerialConfig(Settings->serial_config);
+}
+
+int8_t ParseSerialConfig(const char *pstr)
+{
+  if (strlen(pstr) < 3)
+    return -1;
+
+  int8_t serial_config = (uint8_t)atoi(pstr);
+  if (serial_config < 5 || serial_config > 8)
+    return -1;
+  serial_config -= 5;
+
+  char parity = (pstr[1] & 0xdf);
+  if ('E' == parity) {
+    serial_config += 0x08;                         // Even parity
+  }
+  else if ('O' == parity) {
+    serial_config += 0x10;                         // Odd parity
+  }
+  else if ('N' != parity) {
+    return -1;
+  }
+
+  if ('2' == pstr[2]) {
+    serial_config += 0x04;                         // Stop bits 2
+  }
+  else if ('1' != pstr[2]) {
+    return -1;
+  }
+
+  return serial_config;
+}
+
+uint32_t ConvertSerialConfig(uint8_t serial_config) {
+#ifdef ESP8266
+  return (uint32_t)pgm_read_byte(kTasmotaSerialConfig + serial_config);
+#elif defined(ESP32)
+  return (uint32_t)pgm_read_dword(kTasmotaSerialConfig + serial_config);
+#else
+  #error "platform not supported"
+#endif
+}
+
+// workaround disabled 05.11.2021 solved with https://github.com/espressif/arduino-esp32/pull/5549
+//#if defined(ESP32) && CONFIG_IDF_TARGET_ESP32C3
+// temporary workaround, see https://github.com/espressif/arduino-esp32/issues/5287
+//#include <driver/uart.h>
+//uint32_t GetSerialBaudrate(void) {
+//  uint32_t br;
+//  uart_get_baudrate(0, &br);
+//  return (br / 300) * 300;  // Fix ESP32 strange results like 115201
+//}
+//#else
+uint32_t GetSerialBaudrate(void) {
+  return (Serial.baudRate() / 300) * 300;  // Fix ESP32 strange results like 115201
+}
+//#endif
+
+#ifdef ESP8266
+void SetSerialSwap(void) {
+  if ((15 == Pin(GPIO_TXD)) && (13 == Pin(GPIO_RXD))) {
+    Serial.flush();
+    Serial.swap();
+    AddLog(LOG_LEVEL_DEBUG, PSTR(D_LOG_SERIAL "Serial pins swapped to alternate"));
+  }
+}
+#endif
+
+void SetSerialBegin(void) {
+  TasmotaGlobal.baudrate = Settings->baudrate * 300;
+  AddLog(LOG_LEVEL_INFO, PSTR(D_LOG_SERIAL "Set to %s %d bit/s"), GetSerialConfig().c_str(), TasmotaGlobal.baudrate);
+  Serial.flush();
+#ifdef ESP8266
+  Serial.begin(TasmotaGlobal.baudrate, (SerialConfig)ConvertSerialConfig(Settings->serial_config));
+  SetSerialSwap();
+#endif  // ESP8266
+#ifdef ESP32
+  delay(10);  // Allow time to cleanup queues - if not used hangs ESP32
+  Serial.end();
+  delay(10);  // Allow time to cleanup queues - if not used hangs ESP32
+  Serial.begin(TasmotaGlobal.baudrate, ConvertSerialConfig(Settings->serial_config));
+#endif  // ESP32
+}
+
+void SetSerialConfig(uint32_t serial_config) {
+  if (serial_config > TS_SERIAL_8O2) {
+    serial_config = TS_SERIAL_8N1;
+  }
+  if (serial_config != Settings->serial_config) {
+    Settings->serial_config = serial_config;
+    SetSerialBegin();
+  }
+}
+
+void SetSerialBaudrate(uint32_t baudrate) {
+  TasmotaGlobal.baudrate = baudrate;
+  Settings->baudrate = TasmotaGlobal.baudrate / 300;
+  if (GetSerialBaudrate() != TasmotaGlobal.baudrate) {
+    SetSerialBegin();
+  }
+}
+
+void SetSerial(uint32_t baudrate, uint32_t serial_config) {
+  Settings->flag.mqtt_serial = 0;  // CMND_SERIALSEND and CMND_SERIALLOG
+  Settings->serial_config = serial_config;
+  TasmotaGlobal.baudrate = baudrate;
+  Settings->baudrate = TasmotaGlobal.baudrate / 300;
+  SetSeriallog(LOG_LEVEL_NONE);
+  SetSerialBegin();
+}
+
+void ClaimSerial(void) {
+  TasmotaGlobal.serial_local = true;
+  AddLog(LOG_LEVEL_INFO, PSTR("SNS: Hardware Serial"));
+  SetSeriallog(LOG_LEVEL_NONE);
+  TasmotaGlobal.baudrate = GetSerialBaudrate();
+  Settings->baudrate = TasmotaGlobal.baudrate / 300;
+}
+
+void SerialSendRaw(char *codes)
+{
+  char *p;
+  char stemp[3];
+  uint8_t code;
+
+  int size = strlen(codes);
+
+  while (size > 1) {
+    strlcpy(stemp, codes, sizeof(stemp));
+    code = strtol(stemp, &p, 16);
+    Serial.write(code);
+    size -= 2;
+    codes += 2;
+  }
+}
+
+// values is a comma-delimited string: e.g. "72,101,108,108,111,32,87,111,114,108,100,33,10"
+void SerialSendDecimal(char *values)
+{
+  char *p;
+  uint8_t code;
+  for (char* str = strtok_r(values, ",", &p); str; str = strtok_r(nullptr, ",", &p)) {
+    code = (uint8_t)atoi(str);
+    Serial.write(code);
+  }
+}
+
+/*********************************************************************************************\
  * Sleep aware time scheduler functions borrowed from ESPEasy
 \*********************************************************************************************/
 
@@ -1953,7 +2016,34 @@ const uint8_t I2C_RETRY_COUNTER = 3;
 uint32_t i2c_active[4] = { 0 };
 uint32_t i2c_buffer = 0;
 
+bool I2cBegin(int sda, int scl, uint32_t frequency = 100000);
+bool I2cBegin(int sda, int scl, uint32_t frequency) {
+  bool result = true;
+#ifdef ESP8266
+  Wire.begin(sda, scl);
+#endif
 #ifdef ESP32
+#if ESP_IDF_VERSION_MAJOR > 3  // Core 2.x uses a different I2C library
+  static bool reinit = false;
+  if (reinit) { Wire.end(); }
+#endif  // ESP_IDF_VERSION_MAJOR > 3
+  result = Wire.begin(sda, scl, frequency);
+#if ESP_IDF_VERSION_MAJOR > 3  // Core 2.x uses a different I2C library
+  reinit = result;
+#endif  // ESP_IDF_VERSION_MAJOR > 3
+#endif
+//  AddLog(LOG_LEVEL_DEBUG, PSTR("I2C: Bus1 %d"), result);
+  return result;
+}
+
+#ifdef ESP32
+bool I2c2Begin(int sda, int scl, uint32_t frequency = 100000);
+bool I2c2Begin(int sda, int scl, uint32_t frequency) {
+  bool result = Wire1.begin(sda, scl, frequency);
+//  AddLog(LOG_LEVEL_DEBUG, PSTR("I2C: Bus2 %d"), result);
+  return result;
+}
+
 bool I2cValidRead(uint8_t addr, uint8_t reg, uint8_t size, uint32_t bus = 0);
 bool I2cValidRead(uint8_t addr, uint8_t reg, uint8_t size, uint32_t bus)
 #else
@@ -1963,6 +2053,7 @@ bool I2cValidRead(uint8_t addr, uint8_t reg, uint8_t size)
   uint8_t retry = I2C_RETRY_COUNTER;
   bool status = false;
 #ifdef ESP32
+  if (!TasmotaGlobal.i2c_enabled_2) { bus = 0; }
   TwoWire & myWire = (bus == 0) ? Wire : Wire1;
 #else
   TwoWire & myWire = Wire;
@@ -2077,6 +2168,7 @@ bool I2cWrite(uint8_t addr, uint8_t reg, uint32_t val, uint8_t size)
   uint8_t x = I2C_RETRY_COUNTER;
 
 #ifdef ESP32
+  if (!TasmotaGlobal.i2c_enabled_2) { bus = 0; }
   TwoWire & myWire = (bus == 0) ? Wire : Wire1;
 #else
   TwoWire & myWire = Wire;
@@ -2147,6 +2239,7 @@ void I2cScan(uint32_t bus) {
   Response_P(PSTR("{\"" D_CMND_I2CSCAN "\":\"" D_JSON_I2CSCAN_DEVICES_FOUND_AT));
   for (address = 1; address <= 127; address++) {
 #ifdef ESP32
+    if (!TasmotaGlobal.i2c_enabled_2) { bus = 0; }
     TwoWire & myWire = (bus == 0) ? Wire : Wire1;
 #else
     TwoWire & myWire = Wire;
@@ -2225,6 +2318,7 @@ bool I2cSetDevice(uint32_t addr)
 #endif
 {
 #ifdef ESP32
+  if (!TasmotaGlobal.i2c_enabled_2) { bus = 0; }
   TwoWire & myWire = (bus == 0) ? Wire : Wire1;
 #else
   TwoWire & myWire = Wire;
@@ -2399,8 +2493,19 @@ void AddLogData(uint32_t loglevel, const char* log_data, const char* log_data_pa
   TasAutoMutex mutex((SemaphoreHandle_t *)&TasmotaGlobal.log_buffer_mutex);
 #endif  // ESP32
 
-  char mxtime[14];  // "13:45:21.999 "
-  snprintf_P(mxtime, sizeof(mxtime), PSTR("%02d" D_HOUR_MINUTE_SEPARATOR "%02d" D_MINUTE_SECOND_SEPARATOR "%02d.%03d "), RtcTime.hour, RtcTime.minute, RtcTime.second, RtcMillis());
+  char mxtime[21];  // "13:45:21.999-123/12 "
+  snprintf_P(mxtime, sizeof(mxtime), PSTR("%02d" D_HOUR_MINUTE_SEPARATOR "%02d" D_MINUTE_SECOND_SEPARATOR "%02d.%03d"),
+    RtcTime.hour, RtcTime.minute, RtcTime.second, RtcMillis());
+  if (Settings->flag5.show_heap_with_timestamp) {
+#ifdef ESP8266
+    snprintf_P(mxtime, sizeof(mxtime), PSTR("%s-%03d"),
+      mxtime, ESP_getFreeHeap1024());
+#else
+    snprintf_P(mxtime, sizeof(mxtime), PSTR("%s-%03d/%02d"),
+      mxtime, ESP_getFreeHeap1024(), ESP_getHeapFragmentation());
+#endif
+  }
+  strcat(mxtime, " ");
 
   char empty[2] = { 0 };
   if (!log_data_payload) { log_data_payload = empty; }
@@ -2458,14 +2563,24 @@ void AddLogData(uint32_t loglevel, const char* log_data, const char* log_data_pa
 }
 
 void AddLog(uint32_t loglevel, PGM_P formatP, ...) {
-  va_list arg;
-  va_start(arg, formatP);
-  char* log_data = ext_vsnprintf_malloc_P(formatP, arg);
-  va_end(arg);
-  if (log_data == nullptr) { return; }
+  uint32_t highest_loglevel = TasmotaGlobal.seriallog_level;
+  if (Settings->weblog_level > highest_loglevel) { highest_loglevel = Settings->weblog_level; }
+  if (Settings->mqttlog_level > highest_loglevel) { highest_loglevel = Settings->mqttlog_level; }
+  if (TasmotaGlobal.syslog_level > highest_loglevel) { highest_loglevel = TasmotaGlobal.syslog_level; }
+  if (TasmotaGlobal.templog_level > highest_loglevel) { highest_loglevel = TasmotaGlobal.templog_level; }
+  if (TasmotaGlobal.uptime < 3) { highest_loglevel = LOG_LEVEL_DEBUG_MORE; }  // Log all before setup correct log level
 
-  AddLogData(loglevel, log_data);
-  free(log_data);
+  // If no logging is requested then do not access heap to fight fragmentation
+  if ((loglevel <= highest_loglevel) && (TasmotaGlobal.masterlog_level <= highest_loglevel)) {
+    va_list arg;
+    va_start(arg, formatP);
+    char* log_data = ext_vsnprintf_malloc_P(formatP, arg);
+    va_end(arg);
+    if (log_data == nullptr) { return; }
+
+    AddLogData(loglevel, log_data);
+    free(log_data);
+  }
 }
 
 void AddLogBuffer(uint32_t loglevel, uint8_t *buffer, uint32_t count)

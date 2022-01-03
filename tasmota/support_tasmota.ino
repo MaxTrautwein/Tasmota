@@ -416,11 +416,14 @@ void UpdateLedPowerAll()
 
 void SetLedPowerIdx(uint32_t led, uint32_t state)
 {
+/*
+  // Fix legacy led support 20211016 (Notice: legacy led supports TWO leds max)
   if (!PinUsed(GPIO_LEDLNK) && (0 == led)) {  // Legacy - LED1 is link led only if LED2 is present
     if (PinUsed(GPIO_LED1, 1)) {
       led = 1;
     }
   }
+*/
   if (PinUsed(GPIO_LED1, led)) {
     uint32_t mask = 1 << led;
     if (state) {
@@ -436,7 +439,10 @@ void SetLedPowerIdx(uint32_t led, uint32_t state)
 #else //USE_LIGHT
       pwm = changeUIntScale((uint16_t)(state ? Settings->ledpwm_on : Settings->ledpwm_off), 0, 255, 0, Settings->pwm_range); // linear
 #endif //USE_LIGHT
-      analogWrite(Pin(GPIO_LED1, led), bitRead(TasmotaGlobal.led_inverted, led) ? Settings->pwm_range - pwm : pwm);
+#ifdef ESP32
+      if (analogAttach(Pin(GPIO_LED1, led)))
+#endif
+        analogWrite(Pin(GPIO_LED1, led), bitRead(TasmotaGlobal.led_inverted, led) ? Settings->pwm_range - pwm : pwm);
     } else {
       DigitalWrite(GPIO_LED1, led, bitRead(TasmotaGlobal.led_inverted, led) ? !state : state);
     }
@@ -448,10 +454,15 @@ void SetLedPowerIdx(uint32_t led, uint32_t state)
 #endif // USE_BUZZER
 }
 
-void SetLedPower(uint32_t state)
+void SetLedPower(bool state)
 {
   if (!PinUsed(GPIO_LEDLNK)) {           // Legacy - Only use LED1 and/or LED2
+/*
     SetLedPowerIdx(0, state);
+*/
+    // Fix legacy led support 20211016 (Notice: legacy led supports TWO leds max)
+    uint32_t led = (PinUsed(GPIO_LED1, 1)) ? 1 : 0;
+    SetLedPowerIdx(led, state);
   } else {
     power_t mask = 1;
     for (uint32_t i = 0; i < TasmotaGlobal.leds_present; i++) {  // Map leds to power
@@ -483,6 +494,9 @@ void SetLedLink(uint32_t state)
 #ifdef USE_BUZZER
   BuzzerSetStateToLed(state);
 #endif // USE_BUZZER
+#ifdef USE_PWM_DIMMER
+  if (Settings->flag4.powered_off_led) TasmotaGlobal.restore_powered_off_led_counter = 3;
+#endif  // USE_PWM_DIMMER
 }
 
 void SetPulseTimer(uint32_t index, uint32_t time)
@@ -557,7 +571,7 @@ bool SendKey(uint32_t key, uint32_t device, uint32_t state)
     result = XdrvRulesProcess(0);
   }
 #ifdef USE_PWM_DIMMER
-  if (PWM_DIMMER != TasmotaGlobal.module_type || !result) {
+  if (PWM_DIMMER != TasmotaGlobal.module_type || (!result && !Settings->flag3.mqtt_buttons)) {
 #endif  // USE_PWM_DIMMER
   int32_t payload_save = XdrvMailbox.payload;
   XdrvMailbox.payload = device_save << 24 | key << 16 | state << 8 | device;
@@ -748,6 +762,11 @@ void MqttShowState(void)
     ESP_getFreeHeap1024(), GetTextIndexed(stemp1, sizeof(stemp1), Settings->flag3.sleep_normal, kSleepMode),  // SetOption60 - Enable normal sleep instead of dynamic sleep
     TasmotaGlobal.sleep, TasmotaGlobal.loop_load_avg, MqttConnectCount());
 
+#ifdef USE_BERRY
+    extern void BrShowState(void);
+    BrShowState();
+#endif // USE_BERRY
+
   for (uint32_t i = 1; i <= TasmotaGlobal.devices_present; i++) {
 #ifdef USE_LIGHT
     if ((LightDevice()) && (i >= LightDevice())) {
@@ -827,7 +846,7 @@ String GetSwitchText(uint32_t i) {
   return switch_text;
 }
 
-bool MqttShowSensor(void)
+bool MqttShowSensor(bool call_show_sensor)
 {
   ResponseAppendTime();
 
@@ -886,20 +905,20 @@ bool MqttShowSensor(void)
   }
   ResponseJsonEnd();
 
-  if (json_data_available) { XdrvCall(FUNC_SHOW_SENSOR); }
+  if (call_show_sensor && json_data_available) { XdrvCall(FUNC_SHOW_SENSOR); }
   return json_data_available;
 }
 
 void MqttPublishSensor(void) {
   ResponseClear();
-  if (MqttShowSensor()) {
+  if (MqttShowSensor(true)) {
     MqttPublishTeleSensor();
   }
 }
 
 void MqttPublishTeleperiodSensor(void) {
   ResponseClear();
-  if (MqttShowSensor()) {
+  if (MqttShowSensor(true)) {
     MqttPublishPrefixTopic_P(TELE, PSTR(D_RSLT_SENSOR), Settings->flag.mqtt_sensor_retain);  // CMND_SENSORRETAIN
     XdrvRulesProcess(1);
   }
@@ -967,6 +986,12 @@ void PerformEverySecond(void)
 
   ResetGlobalValues();
 
+  if ((TasmotaGlobal.init_state >= INIT_GPIOS) && PinUsed(GPIO_HEARTBEAT)) {
+    digitalWrite(Pin(GPIO_HEARTBEAT), ~TasmotaGlobal.heartbeat_inverted &1);
+    delayMicroseconds(50);
+    digitalWrite(Pin(GPIO_HEARTBEAT), TasmotaGlobal.heartbeat_inverted);
+  }
+
   if (Settings->tele_period || (3601 == TasmotaGlobal.tele_period)) {
     if (TasmotaGlobal.tele_period >= 9999) {
       if (!TasmotaGlobal.global_state.network_down) {
@@ -986,8 +1011,10 @@ void PerformEverySecond(void)
     }
   }
 
+#ifdef ESP8266
   // Wifi keep alive to send Gratuitous ARP
   wifiKeepAlive();
+#endif
 
   WifiPollNtp();
 
@@ -1025,7 +1052,7 @@ void Every100mSeconds(void)
     if (TasmotaGlobal.pulse_timer[i] != 0L) {           // Timer active?
       if (TimeReached(TasmotaGlobal.pulse_timer[i])) {  // Timer finished?
         TasmotaGlobal.pulse_timer[i] = 0L;              // Turn off this timer
-        for (uint32_t j = 0; j < TasmotaGlobal.devices_present; j = j +MAX_PULSETIMERS) {
+        for (uint32_t j = 0; (i + j) < TasmotaGlobal.devices_present; j = j +MAX_PULSETIMERS) {
           ExecuteCommandPower(i + j +1, (POWER_ALL_OFF_PULSETIME_ON == Settings->poweronstate) ? POWER_ON : POWER_OFF, SRC_PULSETIMER);
         }
       }
@@ -1198,8 +1225,18 @@ void Every250mSeconds(void)
           char version[50];
           snprintf_P(version, sizeof(version), PSTR("%s%s"), TasmotaGlobal.version, TasmotaGlobal.image_name);
           AddLog(LOG_LEVEL_DEBUG, PSTR(D_LOG_UPLOAD "%s %s"), full_ota_url, version);
+#if defined(ESP32) && defined(USE_WEBCLIENT_HTTPS)
+          HTTPClientLight OTAclient;
+          if (!OTAclient.begin(full_ota_url)) {
+            AddLog(LOG_LEVEL_INFO, "OTA: unsupported protocol");
+            ota_result = -999;
+          } else {
+            ota_result = (HTTP_UPDATE_FAILED != httpUpdateLight.update(OTAclient, version));
+          }
+#else // standard OTA over HTTP
           WiFiClient OTAclient;
           ota_result = (HTTP_UPDATE_FAILED != ESPhttpUpdate.update(OTAclient, full_ota_url, version));
+#endif
           if (!ota_result) {
 #ifndef FIRMWARE_MINIMAL
             int ota_error = ESPhttpUpdate.getLastError();
@@ -1643,6 +1680,22 @@ void ResetPwm(void)
 
 /********************************************************************************************/
 
+#ifdef ESP32
+// Since ESP-IDF 4.4, GPIO matrix or I/O is not reset during a restart
+// and GPIO configuration can get stuck because of leftovers
+//
+// This patched version of pinMode forces a full GPIO reset before setting new mode
+//
+extern "C" void ARDUINO_ISR_ATTR __pinMode(uint8_t pin, uint8_t mode);
+
+extern "C" void ARDUINO_ISR_ATTR pinMode(uint8_t pin, uint8_t mode) {
+  gpio_reset_pin((gpio_num_t)pin);
+  __pinMode(pin, mode);
+}
+#endif
+
+/********************************************************************************************/
+
 void GpioInit(void)
 {
   if (!ValidModule(Settings->module)) {
@@ -1758,6 +1811,10 @@ void GpioInit(void)
         TasmotaGlobal.ledlnk_inverted = 1;
         mpin -= (AGPIO(GPIO_LEDLNK_INV) - AGPIO(GPIO_LEDLNK));
       }
+      else if (mpin == AGPIO(GPIO_HEARTBEAT_INV)) {
+        TasmotaGlobal.heartbeat_inverted = 1;
+        mpin -= (AGPIO(GPIO_HEARTBEAT_INV) - AGPIO(GPIO_HEARTBEAT));
+      }
       else if ((mpin >= AGPIO(GPIO_PWM1_INV)) && (mpin < (AGPIO(GPIO_PWM1_INV) + MAX_PWMS))) {
         bitSet(TasmotaGlobal.pwm_inverted, mpin - AGPIO(GPIO_PWM1_INV));
         mpin -= (AGPIO(GPIO_PWM1_INV) - AGPIO(GPIO_PWM1));
@@ -1779,6 +1836,7 @@ void GpioInit(void)
 
 #ifdef ESP8266
   if ((2 == Pin(GPIO_TXD)) || (H801 == TasmotaGlobal.module_type)) { Serial.set_tx(2); }
+  SetSerialSwap();
 #endif
 
   uint32_t sspi_mosi = (PinUsed(GPIO_SSPI_SCLK) && PinUsed(GPIO_SSPI_MOSI)) ? SPI_MOSI : SPI_NONE;
@@ -1882,6 +1940,11 @@ void GpioInit(void)
 #endif  // ESP8266
   }
 
+  if (PinUsed(GPIO_HEARTBEAT)) {
+    pinMode(Pin(GPIO_HEARTBEAT), OUTPUT);
+    digitalWrite(Pin(GPIO_HEARTBEAT), TasmotaGlobal.heartbeat_inverted);
+  }
+
   // Digital input
   for (uint32_t i = 0; i < MAX_SWITCHES; i++) {
     if (PinUsed(GPIO_INPUT, i)) {
@@ -1892,12 +1955,12 @@ void GpioInit(void)
 #ifdef USE_I2C
   TasmotaGlobal.i2c_enabled = (PinUsed(GPIO_I2C_SCL) && PinUsed(GPIO_I2C_SDA));
   if (TasmotaGlobal.i2c_enabled) {
-    Wire.begin(Pin(GPIO_I2C_SDA), Pin(GPIO_I2C_SCL));
+    TasmotaGlobal.i2c_enabled = I2cBegin(Pin(GPIO_I2C_SDA), Pin(GPIO_I2C_SCL));
   }
 #ifdef ESP32
   TasmotaGlobal.i2c_enabled_2 = (PinUsed(GPIO_I2C_SCL, 1) && PinUsed(GPIO_I2C_SDA, 1));
   if (TasmotaGlobal.i2c_enabled_2) {
-    Wire1.begin(Pin(GPIO_I2C_SDA, 1), Pin(GPIO_I2C_SCL, 1));
+    TasmotaGlobal.i2c_enabled_2 = I2c2Begin(Pin(GPIO_I2C_SDA, 1), Pin(GPIO_I2C_SCL, 1));
   }
 #endif
 #endif  // USE_I2C
@@ -1936,7 +1999,7 @@ void GpioInit(void)
       pinMode(Pin(GPIO_PWM1, i), OUTPUT);
 #endif  // ESP8266
 #ifdef ESP32
-      analogAttach(Pin(GPIO_PWM1, i), i);
+      analogAttach(Pin(GPIO_PWM1, i));
 #endif  // ESP32
       if (TasmotaGlobal.light_type) {
         // force PWM GPIOs to low or high mode, see #7165

@@ -1158,7 +1158,7 @@ void LightInit(void)
         pinMode(Pin(GPIO_PWM1, i), OUTPUT);
 #endif  // ESP8266
 #ifdef ESP32
-        analogAttach(Pin(GPIO_PWM1, i), i);
+        analogAttach(Pin(GPIO_PWM1, i));
 #endif  // ESP32
       }
     }
@@ -1656,6 +1656,13 @@ uint8_t LightGetSpeedSetting(void) {
   return Settings->light_speed;
 }
 
+// Force to reapply color, for example when PWM Frequency changed
+void LightReapplyColor(void) {
+  for (uint32_t i = 0; i < LST_MAX; i++) {
+    Light.last_color[i] = 0;
+  }
+}
+
 // On entry Light.new_color[5] contains the color to be displayed
 // and Light.last_color[5] the color currently displayed
 // Light.power tells which lights or channels (SetOption68) are on/off
@@ -1811,6 +1818,7 @@ void LightAnimate(void)
         memcpy(Light.fade_start_10, cur_col_10, sizeof(Light.fade_start_10));
         // push the final values at 8 and 10 bits resolution to the PWMs
         LightSetOutputs(cur_col_10);
+        LightStopFade();
         Light.fade_initialized = true;      // it is now ok to fade
         Light.fade_once_enabled = false;    // light has been set, reset fade_once_enabled
         Light.speed_once_enabled = false;   // light has been set, reset speed_once_enabled
@@ -1835,10 +1843,6 @@ void LightAnimate(void)
         LightSetOutputs(Light.fade_cur_10);
       }
     }
-#ifdef USE_PWM_DIMMER
-    // If the power is off and the fade is done, turn the relay off.
-    if (PWM_DIMMER == TasmotaGlobal.module_type && !Light.power && !Light.fade_running) PWMDimmerSetPower();
-#endif  // USE_PWM_DIMMER
     // For WYZE bulbs we must set the CT pin (PWM2) to INPUT to fully turn it off
     if (TasmotaGlobal.gpio_optiona.pwm1_input && !Light.power && !Light.fade_running) {  // GPIO Option_A1
       if (PinUsed(GPIO_PWM1, 1)) { pinMode(Pin(GPIO_PWM1, 1), INPUT); }
@@ -1851,10 +1855,12 @@ bool isChannelGammaCorrected(uint32_t channel) {
   if (channel >= Light.subtype) { return false; }     // Out of range
 #ifdef ESP8266
   if ((PHILIPS == TasmotaGlobal.module_type) || (Settings->flag4.pwm_ct_mode)) {
+#else
+  if (Settings->flag4.pwm_ct_mode) {
+#endif  // ESP8266
     if ((LST_COLDWARM == Light.subtype) && (1 == channel)) { return false; }   // PMW reserved for CT
     if ((LST_RGBCW == Light.subtype) && (4 == channel)) { return false; }   // PMW reserved for CT
   }
-#endif  // ESP8266
   return true;
 }
 
@@ -1862,10 +1868,12 @@ bool isChannelGammaCorrected(uint32_t channel) {
 bool isChannelCT(uint32_t channel) {
 #ifdef ESP8266
   if ((PHILIPS == TasmotaGlobal.module_type) || (Settings->flag4.pwm_ct_mode)) {
+#else
+  if (Settings->flag4.pwm_ct_mode) {
+#endif  // ESP8266
     if ((LST_COLDWARM == Light.subtype) && (1 == channel)) { return true; }   // PMW reserved for CT
     if ((LST_RGBCW == Light.subtype) && (4 == channel)) { return true; }   // PMW reserved for CT
   }
-#endif  // ESP8266
   return false;
 }
 
@@ -1893,6 +1901,14 @@ uint8_t LightGetCurFadeBri(void) {
     if (bri_i > max_bri) max_bri = bri_i ;
   }
   return max_bri;
+}
+
+void LightStopFade(void) {
+  Light.fade_running = false;
+#ifdef USE_PWM_DIMMER
+  // If the power is off and the fade is done, turn the relay off.
+  if (PWM_DIMMER == TasmotaGlobal.module_type && !Light.power) PWMDimmerSetPower();
+#endif  // USE_PWM_DIMMER
 }
 
 bool LightApplyFade(void) {   // did the value chanegd and needs to be applied
@@ -1933,7 +1949,7 @@ bool LightApplyFade(void) {   // did the value chanegd and needs to be applied
       }
     } else {
       // no fade needed, we keep the duration at zero, it will fallback directly to end of fade
-      Light.fade_running = false;
+      LightStopFade();
     }
   }
 
@@ -1953,7 +1969,7 @@ bool LightApplyFade(void) {   // did the value chanegd and needs to be applied
   } else {
     // stop fade
 //AddLop_P2(LOG_LEVEL_DEBUG, PSTR("Stop fade"));
-    Light.fade_running = false;
+    LightStopFade();
     Light.fade_start = 0;
     Light.fade_duration = 0;
     // set light to target value
@@ -2147,9 +2163,12 @@ bool calcGammaBulbs(uint16_t cur_col_10[5]) {
 
   // Now we know ct_10 and white_bri10 (gamma corrected if needed)
 
-#ifdef ESP8266
   if ((LST_COLDWARM == Light.subtype) || (LST_RGBCW == Light.subtype)) {
+#ifdef ESP8266
     if ((PHILIPS == TasmotaGlobal.module_type) || (Settings->flag4.pwm_ct_mode)) {   // channel 1 is the color tone, mapped to cold channel (0..255)
+#else
+    if (Settings->flag4.pwm_ct_mode) {   // channel 1 is the color tone, mapped to cold channel (0..255)
+#endif  // ESP8266
       pwm_ct = true;
       // Xiaomi Philips bulbs follow a different scheme:
       // channel 0=intensity, channel1=temperature
@@ -2158,7 +2177,6 @@ bool calcGammaBulbs(uint16_t cur_col_10[5]) {
       return false;     // avoid any interference
     }
   }
-#endif  // ESP8266
 
   // Now see if we need to mix RGB and  White
   // Valid only for LST_RGBW, LST_RGBCW, SetOption105 1, and white is zero (see doc)
@@ -2930,7 +2948,7 @@ void CmndFade(void)
   #ifdef USE_DEVICE_GROUPS
     if (XdrvMailbox.payload >= 0 && XdrvMailbox.payload <= 2) SendDeviceGroupMessage(Light.device, DGR_MSGTYP_UPDATE, DGR_ITEM_LIGHT_FADE, Settings->light_fade);
   #endif  // USE_DEVICE_GROUPS
-    if (!Settings->light_fade) { Light.fade_running = false; }
+    if (!Settings->light_fade) { LightStopFade(); }
   }
   ResponseCmndStateText(Settings->light_fade);
 }
@@ -2944,7 +2962,7 @@ void CmndSpeed(void)
       Light.fade_once_value = (XdrvMailbox.payload > 0);
       Light.speed_once_enabled = true;
       Light.speed_once_value = XdrvMailbox.payload;
-      if (!Light.fade_once_value) { Light.fade_running = false; }
+      if (!Light.fade_once_value) { LightStopFade(); }
     }
     ResponseCmndIdxNumber(Light.speed_once_value);
   } else {
@@ -3193,6 +3211,17 @@ bool Xdrv04(uint8_t function)
       case FUNC_SET_POWER:
         LightSetPower();
         break;
+      case FUNC_BUTTON_MULTI_PRESSED:
+        result = XlgtCall(FUNC_BUTTON_MULTI_PRESSED);
+        break;
+#ifdef USE_WEBSERVER
+      case FUNC_WEB_ADD_MAIN_BUTTON:
+        XlgtCall(FUNC_WEB_ADD_MAIN_BUTTON);
+        break;
+      case FUNC_WEB_GET_ARG:
+        XlgtCall(FUNC_WEB_GET_ARG);
+        break;
+#endif  // USE_WEBSERVER
       case FUNC_COMMAND:
         result = DecodeCommand(kLightCommands, LightCommand, kLightSynonyms);
         if (!result) {
