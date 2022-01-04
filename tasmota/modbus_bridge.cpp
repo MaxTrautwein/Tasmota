@@ -73,7 +73,7 @@ void modbus_bridgeInit(uint8_t mode){
   // Rx and Tx work but sometimes there are some itermittend issues
   //Are those ports already used for somthing else?
   modBusBridgeInstance = new TasmotaModbus(Pin(GPIO_MODBUSBRIDGE_RX,0) , Pin(GPIO_MODBUSBRIDGE_TX,0));
-  uint8_t result = modBusBridgeInstance->Begin(9600,1);
+  uint8_t result = modBusBridgeInstance->Begin(9600,SERIAL_8N1);
   
   //Other Uses of TasmotaModbus seems to all do that.
   //TODO Check what its purpose is.
