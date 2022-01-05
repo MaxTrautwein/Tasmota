@@ -108,17 +108,22 @@ void modbus_bridgeInit(uint8_t mode){
  */
 byte ModbusRx(uint8_t& address,uint8_t& function,uint8_t data[],uint8_t& ec ,bool include_crc = false ){
   byte status = 0;
-
+  byte crcSub = include_crc ? 0 : 2;
   if(modBusBridgeInstance->ReceiveReady())
   {
     byte cnt= modBusBridgeInstance->ReceiveCount();
     byte InputBuff[cnt];
     ec = modBusBridgeInstance->ReceiveBuffer(InputBuff,cnt);
-    memcpy(&address,InputBuff,sizeof(byte));
-    memcpy(&function,InputBuff + 1,sizeof(byte));
-    byte crcSub = include_crc ? 0 : 2;
-    memcpy(data,InputBuff +2 ,sizeof(byte)* (cnt-2 -crcSub));
-    status = cnt - crcSub;
+    if (ec == 0 && cnt >= 3){
+      memcpy(&address,InputBuff,sizeof(byte));
+      memcpy(&function,InputBuff + 1,sizeof(byte));
+      memcpy(data,InputBuff +2 ,sizeof(byte)* (cnt-2 -crcSub));
+      status = cnt - crcSub;
+    }else{
+      char jdata[500] = "";
+      sprintf(jdata, "ERROR - ModbusRx  ec: %u ; cnt: %u", ec,cnt);
+      MqttPublishPayload("tasmota/modbusbridge/rx",jdata);
+    }
   }
 
   //Status Holds the number of bytes read
