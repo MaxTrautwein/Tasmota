@@ -6,10 +6,16 @@
 #include <tasmota_globals.h>
 #include <tasmota_template.h>
 
-
 TasmotaModbus *modBusBridgeInstance;
 
-
+/**
+ * @brief 
+ * 
+ * @param json 
+ * @param tok 
+ * @param s 
+ * @return int 
+ */
 static int jsoneq(const char* json, jsmntok_t* tok, const char* s) {
     if (tok->type == JSMN_STRING && (int)strlen(s) == tok->len &&
         strncmp(json + tok->start, s, tok->len) == 0) {
@@ -18,6 +24,16 @@ static int jsoneq(const char* json, jsmntok_t* tok, const char* s) {
     return -1;
 }
 
+/**
+ * @brief Get the Key Value object
+ * 
+ * @param tokenCnt 
+ * @param Tokens 
+ * @param key 
+ * @param json 
+ * @param Outdata 
+ * @return int 
+ */
 static int GetKeyValue(int tokenCnt, jsmntok_t Tokens[],const char* key, const char* json, byte& Outdata) {
     int len = -1;
     for (int i = 1; i < tokenCnt; i++) {
@@ -33,6 +49,16 @@ static int GetKeyValue(int tokenCnt, jsmntok_t Tokens[],const char* key, const c
     return len;
 }
 
+/**
+ * @brief Get the Key Value object
+ * 
+ * @param tokenCnt 
+ * @param Tokens 
+ * @param key 
+ * @param json 
+ * @param Return 
+ * @return int 
+ */
 static int GetKeyValue(int tokenCnt, jsmntok_t Tokens[], const char* key, const char* json , byte Return[]  ) {
     int j = -1;
     for (int i = 1; i < tokenCnt; i++) {
@@ -85,23 +111,13 @@ void modbus_bridgeInit(uint8_t mode){
   //modBusBridgeInstance->m_hardserial
   status = 1;
 }
-// JSON:
-// id:
-// function:
-// data:
-
-
-
-//Relay data of the modbus to MQTT
-// "MQTTbridge/<Device ID>"
-
 
 /**
  * @brief This function provides access to recived messages.
  * 
- * @param address 
- * @param function 
- * @param data
+ * @param address Modbus Address
+ * @param function Modbus Function
+ * @param data Upto 252 Bytes of data + 2 Bytes if include_crc == true
  * @param ec Holds the Return / Error Code of TasmotaModbus->ReceiveBuffer
  * @param include_crc if this is set to true then the CRC will be included in data, otherwise it will be omitted
  * @return byte Number of bytes recived
@@ -111,21 +127,21 @@ byte ModbusRx(uint8_t& address,uint8_t& function,uint8_t data[],uint8_t& ec ,boo
   byte crcSub = include_crc ? 0 : 2;
   if(modBusBridgeInstance->ReceiveReady())
   {
+    //While the theoretical max size is 256 Byte the maximum supported by TasmotaModbus is 255 Byte
+    byte InputBuff[255];
+    ec = modBusBridgeInstance->ReceiveBuffer(InputBuff,255);
     byte cnt= modBusBridgeInstance->ReceiveCount();
-    byte InputBuff[cnt];
-    ec = modBusBridgeInstance->ReceiveBuffer(InputBuff,cnt);
     if (ec == 0 && cnt >= 3){
       memcpy(&address,InputBuff,sizeof(byte));
       memcpy(&function,InputBuff + 1,sizeof(byte));
       memcpy(data,InputBuff +2 ,sizeof(byte)* (cnt-2 -crcSub));
       status = cnt - crcSub;
     }else{
-      char jdata[500] = "";
+      char jdata[70] = "";
       sprintf(jdata, "ERROR - ModbusRx  ec: %u ; cnt: %u", ec,cnt);
       MqttPublishPayload("tasmota/modbusbridge/rx",jdata);
     }
   }
-
   //Status Holds the number of bytes read
   return status;
 }
@@ -135,12 +151,12 @@ byte ModbusRx(uint8_t& address,uint8_t& function,uint8_t data[],uint8_t& ec ,boo
  * 
  */
 void ModbusToMQTT(){
-   modbus_bridgeInit(1);
+  modbus_bridgeInit(1);
   byte address = 0;
   byte function = 0;
-  byte data[252];
+  byte data[ModbusMaxDataLen];
   uint8_t errorCode;
-  byte rxcnt =  ModbusRx(address,function,data,errorCode);
+  byte rxcnt = ModbusRx(address,function,data,errorCode);
   if (rxcnt > 0)
   {
     char jdata[RxJsonBuffSize] = "";
