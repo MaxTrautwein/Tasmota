@@ -2336,11 +2336,29 @@ void CmndTouchNum(void)
 #endif  // ESP32
 
 
+/**
+ * @brief MQTT to Modbus Command Handler
+ * 
+ */
 void CmndMQTTBridge(void){
 
-  MQTTtoModbus(XdrvMailbox.data);
-
-  //Prevent Negative response Code
-  ResponseCmndDone();
-
+  switch (MQTTtoModbus(XdrvMailbox.data))
+  {
+    case 0:
+      //Success 
+      ResponseCmndDone();
+      break;
+    case 1:
+      //Init Error
+      MqttPublishPayload("stat/dev/test/RESULT","{\"mqttbridge\":\"Error Init Failed\"}");
+      break;
+    case 2:
+      //Missing Data Error
+      MqttPublishPayload("stat/dev/test/RESULT","{\"mqttbridge\":\"Error Missing Data\"}");
+      break;
+    
+    default:
+      MqttPublishPayload("stat/dev/test/RESULT","{\"mqttbridge\":\"Error Unexpected RC\"}");
+      break;
+  } 
 }

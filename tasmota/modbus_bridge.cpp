@@ -9,12 +9,12 @@
 TasmotaModbus *modBusBridgeInstance;
 
 /**
- * @brief 
+ * @brief Check if a Token matches a Key
  * 
- * @param json 
- * @param tok 
- * @param s 
- * @return int 
+ * @param json Json String
+ * @param tok Single Token
+ * @param s Key
+ * @return int 0 if tok matches s. Otherwise -1
  */
 static int jsoneq(const char* json, jsmntok_t* tok, const char* s) {
     if (tok->type == JSMN_STRING && (int)strlen(s) == tok->len &&
@@ -25,14 +25,14 @@ static int jsoneq(const char* json, jsmntok_t* tok, const char* s) {
 }
 
 /**
- * @brief Get the Key Value object
+ * @brief Get the Key Value Byte
  * 
- * @param tokenCnt 
- * @param Tokens 
- * @param key 
- * @param json 
- * @param Outdata 
- * @return int 
+ * @param tokenCnt Total number of Tokens
+ * @param Tokens Token Array
+ * @param key Key to get
+ * @param json Json String
+ * @param Outdata Value
+ * @return int Length
  */
 static int GetKeyValue(int tokenCnt, jsmntok_t Tokens[],const char* key, const char* json, byte& Outdata) {
     int len = -1;
@@ -50,14 +50,14 @@ static int GetKeyValue(int tokenCnt, jsmntok_t Tokens[],const char* key, const c
 }
 
 /**
- * @brief Get the Key Value object
+ * @brief Get the Key Value Array of Byte
  * 
- * @param tokenCnt 
- * @param Tokens 
- * @param key 
- * @param json 
- * @param Return 
- * @return int 
+ * @param tokenCnt Total number of Tokens
+ * @param Tokens Token Array
+ * @param key Key to get
+ * @param json Json String
+ * @param Return Array of Value
+ * @return int Length
  */
 static int GetKeyValue(int tokenCnt, jsmntok_t Tokens[], const char* key, const char* json , byte Return[]  ) {
     int j = -1;
@@ -81,23 +81,16 @@ static int GetKeyValue(int tokenCnt, jsmntok_t Tokens[], const char* key, const 
 }
 
 /**
- * @brief (TODO) Init Method. Establish Modbus connection? other stuff? 
+ * @brief Init the Modbus Interface if possible
  * 
+ * @return true If init was successful otherwise false
  */
-void modbus_bridgeInit(uint8_t mode){
+bool modbus_bridgeInit(){
   static byte status = 0;
-  if (status != 0 && mode == 1) return;
-  //TODO Get proper pins
+  if (status != 0) return true;
+  //Only run if Configured
+  if (!PinUsed(GPIO_MODBUSBRIDGE_RX,0) || !PinUsed(GPIO_MODBUSBRIDGE_TX,0)) return false;
 
-  //Using 
-  //16 RX
-  //17 TX
-  //--> TX works fine but no RX at all
-  //The new config with 
-  //3 RX
-  //1 TX
-  // Rx and Tx work but sometimes there are some itermittend issues
-  //Are those ports already used for somthing else?
   modBusBridgeInstance = new TasmotaModbus(Pin(GPIO_MODBUSBRIDGE_RX,0) , Pin(GPIO_MODBUSBRIDGE_TX,0));
   uint8_t result = modBusBridgeInstance->Begin(9600,SERIAL_8N1);
   
@@ -108,8 +101,8 @@ void modbus_bridgeInit(uint8_t mode){
       ClaimSerial();
   }
 
-  //modBusBridgeInstance->m_hardserial
   status = 1;
+  return true;
 }
 
 /**
@@ -151,7 +144,7 @@ byte ModbusRx(uint8_t& address,uint8_t& function,uint8_t data[],uint8_t& ec ,boo
  * 
  */
 void ModbusToMQTT(){
-  modbus_bridgeInit(1);
+  if (!modbus_bridgeInit()) return;
   byte address = 0;
   byte function = 0;
   byte data[ModbusMaxDataLen];
@@ -175,9 +168,12 @@ void ModbusToMQTT(){
 /**
  * @brief Relays messages from MQTT to Modbus
  * 
- * @param json 
+ * @param json Json String
+ * @return byte 
+ * 0 = Pass
+ * 1 = Init Error
  */
-void MQTTtoModbus(const char* json){
+byte MQTTtoModbus(const char* json){
   jsmn_parser p;
   jsmntok_t t[257]; 
   byte data[252];
@@ -189,15 +185,20 @@ void MQTTtoModbus(const char* json){
   r = jsmn_parse(&p,json , strlen(json), t, 128); // "s" is the char array holding the json content
   byte address = 0;
   byte function = 0;
-  rc_Status = GetKeyValue(r, t, "Address",json,address);
-  rc_Status += GetKeyValue(r, t, "Function",json,function);
+  if(GetKeyValue(r, t, "Address",json,address) > 0) rc_Status++;
+  if(GetKeyValue(r, t, "Function",json,function)> 0) rc_Status++;
   datalen = GetKeyValue(r, t, "Data", json,data);
-  
-  if (rc_Status >= 2 && datalen > 0)
+
+  if (rc_Status == 2 && datalen > 0)
   {
     byte datar[datalen];
     memcpy(datar,data,sizeof(byte)*datalen);
-    modbus_bridgeInit(1);
+    
+    if (!modbus_bridgeInit()){
+      return 1;
+    }
     modBusBridgeInstance->Send(address,function,datar);
+    return 0;
   }
+  return 2;
 }
