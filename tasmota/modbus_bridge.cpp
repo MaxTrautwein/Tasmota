@@ -1,12 +1,9 @@
-#include <TasmotaModbus.h>
 #include <modbus_bridge.h>
-#include <jsmn.h>
 #include <language/en_GB.h>
 #include <tasmota.h>
 #include <tasmota_globals.h>
 #include <tasmota_template.h>
 
-TasmotaModbus *modBusBridgeInstance;
 
 /**
  * @brief Check if a Token matches a Key
@@ -16,7 +13,7 @@ TasmotaModbus *modBusBridgeInstance;
  * @param s Key
  * @return int 0 if tok matches s. Otherwise -1
  */
-static int jsoneq(const char* json, jsmntok_t* tok, const char* s) {
+int ModbusMqttBridge::jsoneq(const char* json, jsmntok_t* tok, const char* s) {
     if (tok->type == JSMN_STRING && (int)strlen(s) == tok->len &&
         strncmp(json + tok->start, s, tok->len) == 0) {
         return 0;
@@ -34,7 +31,7 @@ static int jsoneq(const char* json, jsmntok_t* tok, const char* s) {
  * @param Outdata Value
  * @return int Length
  */
-static int GetKeyValue(int tokenCnt, jsmntok_t Tokens[],const char* key, const char* json, byte& Outdata) {
+int ModbusMqttBridge::GetKeyValue(int tokenCnt, jsmntok_t Tokens[],const char* key, const char* json, byte& Outdata) {
     int len = -1;
     for (int i = 1; i < tokenCnt; i++) {
         if (jsoneq(json, &Tokens[i], key) == 0) {
@@ -59,7 +56,7 @@ static int GetKeyValue(int tokenCnt, jsmntok_t Tokens[],const char* key, const c
  * @param Return Array of Value
  * @return int Length
  */
-static int GetKeyValue(int tokenCnt, jsmntok_t Tokens[], const char* key, const char* json , byte Return[]  ) {
+int ModbusMqttBridge::GetKeyValue(int tokenCnt, jsmntok_t Tokens[], const char* key, const char* json , byte Return[]  ) {
     int j = -1;
     for (int i = 1; i < tokenCnt; i++) {
         if (jsoneq(json, &Tokens[i], key) == 0) {
@@ -80,19 +77,19 @@ static int GetKeyValue(int tokenCnt, jsmntok_t Tokens[], const char* key, const 
     return j;
 }
 
+
 /**
  * @brief Init the Modbus Interface if possible
  * 
  * @return true If init was successful otherwise false
  */
-bool modbus_bridgeInit(){
-  static byte status = 0;
-  if (status != 0) return true;
+bool ModbusMqttBridge::modbus_bridgeInit(){
+  if (ModbusActive) return true;
   //Only run if Configured
   if (!PinUsed(GPIO_MODBUSBRIDGE_RX,0) || !PinUsed(GPIO_MODBUSBRIDGE_TX,0)) return false;
 
   modBusBridgeInstance = new TasmotaModbus(Pin(GPIO_MODBUSBRIDGE_RX,0) , Pin(GPIO_MODBUSBRIDGE_TX,0));
-  uint8_t result = modBusBridgeInstance->Begin(9600,SERIAL_8N1);
+  uint8_t result = modBusBridgeInstance->Begin(Baudrate,ModbusConf);
   
   //Other Uses of TasmotaModbus seems to all do that.
   //TODO Check what its purpose is.
@@ -101,7 +98,7 @@ bool modbus_bridgeInit(){
       ClaimSerial();
   }
 
-  status = 1;
+  ModbusActive = true;
   return true;
 }
 
@@ -115,7 +112,7 @@ bool modbus_bridgeInit(){
  * @param include_crc if this is set to true then the CRC will be included in data, otherwise it will be omitted
  * @return byte Number of bytes recived
  */
-byte ModbusRx(uint8_t& address,uint8_t& function,uint8_t data[],uint8_t& ec ,bool include_crc = false ){
+byte ModbusMqttBridge::ModbusRx(uint8_t& address,uint8_t& function,uint8_t data[],uint8_t& ec ,bool include_crc = false ){
   byte status = 0;
   byte crcSub = include_crc ? 0 : 2;
   if(modBusBridgeInstance->ReceiveReady())
@@ -143,7 +140,7 @@ byte ModbusRx(uint8_t& address,uint8_t& function,uint8_t data[],uint8_t& ec ,boo
  * @brief Recives data from Modbus and Transmits it via MQTT
  * 
  */
-void ModbusToMQTT(){
+void ModbusMqttBridge::ModbusToMQTT(){
   if (!modbus_bridgeInit()) return;
   byte address = 0;
   byte function = 0;
@@ -164,16 +161,92 @@ void ModbusToMQTT(){
   }
 }
 
+/**
+ * @brief Update The Modbus Configuration
+ * 
+ * JSON Keys with Values
+ * 
+ * "Baud":
+ *  (0)  1200
+ *  (1)  2400
+ *  (2)  4800
+ *  (3)  9600   (default)
+ *  (4)  14400
+ *  (5)  19200
+ * 
+ * "Config":
+ *  (0)  SERIAL_8N1 (default)
+ *  (1)  SERIAL_8N2
+ *  (2)  SERIAL_8E1
+ *  (3)  SERIAL_8E2
+ *  (4)  SERIAL_8O1
+ *  (5)  SERIAL_8O2
+ * 
+ * @param json JSON msg
+ * @return byte
+ * 0 = Pass
+ * 1 = No valid Data
+ * 2 = invalid Baud Index
+ * 3 = invalid Config Index
+ */
+byte ModbusMqttBridge::ModbusConfigCmd(const char* json){
+  byte BaudIndex = 0;
+  byte ConfigIndex = 0;
+  jsmn_parser p;
+  jsmntok_t t[20]; 
+  byte matches = 0;
+  byte Updates = 0;
+
+  jsmn_init(&p);
+  int r = 0;
+  r = jsmn_parse(&p,json , strlen(json), t, 20);
+  if(GetKeyValue(r, t, "Baud",json,BaudIndex) > 0) {
+    matches = 1;
+    if (BaudIndex < (sizeof(SerialBauds)/sizeof(*SerialBauds))){
+      if (Baudrate != SerialBauds[BaudIndex]) Updates++;
+      Baudrate = SerialBauds[BaudIndex];
+    }else{
+      return 2;
+    }
+
+  }
+  if(GetKeyValue(r, t, "Config",json,ConfigIndex)> 0) {
+    matches += 2;
+    if (ConfigIndex < (sizeof(SerialModes)/sizeof(*SerialModes))){
+      if (ModbusConf != SerialModes[ConfigIndex]) Updates++;
+      ModbusConf = SerialModes[ConfigIndex];
+    }else{
+      return 3;
+    }
+  }
+
+  if (Updates){
+    //There dos not seem to be a command to close the Modbus
+    ModbusActive = false;
+  }
+  if (matches){
+    return 0;
+  }else{
+    return 1;
+  }
+}
+
 
 /**
  * @brief Relays messages from MQTT to Modbus
+ * 
+ * JSON Keys:
+ * 
+ * "Address"  -> 1 Byte Target Address
+ * "Function" -> 1 Byte Function Code
+ * "Data"     -> 1-252 Byte of Data (Array)
  * 
  * @param json Json String
  * @return byte 
  * 0 = Pass
  * 1 = Init Error
  */
-byte MQTTtoModbus(const char* json){
+byte ModbusMqttBridge::MQTTtoModbus(const char* json){
   jsmn_parser p;
   jsmntok_t t[257]; 
   byte data[252];
@@ -182,7 +255,7 @@ byte MQTTtoModbus(const char* json){
 
   jsmn_init(&p);
   int r = 0;
-  r = jsmn_parse(&p,json , strlen(json), t, 128); // "s" is the char array holding the json content
+  r = jsmn_parse(&p,json , strlen(json), t, 128);
   byte address = 0;
   byte function = 0;
   if(GetKeyValue(r, t, "Address",json,address) > 0) rc_Status++;
@@ -201,4 +274,14 @@ byte MQTTtoModbus(const char* json){
     return 0;
   }
   return 2;
+}
+
+/**
+ * @brief Get the Modbus Mqtt Bridge object
+ * 
+ * @return ModbusMqttBridge* Always the same instance
+ */
+ModbusMqttBridge* GetModbusMqttBridge(){
+  static ModbusMqttBridge *classref = new ModbusMqttBridge();
+  return classref;
 }

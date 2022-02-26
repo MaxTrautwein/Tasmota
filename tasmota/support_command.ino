@@ -46,8 +46,7 @@ const char kTasmotaCommands[] PROGMEM = "|"  // No prefix
 #ifdef ESP32
    "|Info|" D_CMND_TOUCH_CAL "|" D_CMND_TOUCH_THRES "|" D_CMND_TOUCH_NUM "|" D_CMND_CPU_FREQUENCY
 #endif  // ESP32
-  "|" D_CMND_MQTTBRIDGE;
-
+  "|" D_CMND_MQTTBRIDGE "|" D_CMND_MQTTBRIDGECONF;
 SO_SYNONYMS(kTasmotaSynonyms,
   127,
 );
@@ -78,8 +77,7 @@ void (* const TasmotaCommand[])(void) PROGMEM = {
 #ifdef ESP32
   , &CmndInfo, &CmndTouchCal, &CmndTouchThres, &CmndTouchNum, &CmndCpuFrequency
 #endif  // ESP32
-  , &CmndMQTTBridge
-  
+  , &CmndMQTTBridge , &CmndConfMQTTBridge
   };
 
 const char kWifiConfig[] PROGMEM =
@@ -2335,14 +2333,12 @@ void CmndTouchNum(void)
 
 #endif  // ESP32
 
-
 /**
- * @brief MQTT to Modbus Command Handler
+ * @brief MQTT to Modbus tx Command Handler
  * 
  */
 void CmndMQTTBridge(void){
-
-  switch (MQTTtoModbus(XdrvMailbox.data))
+  switch (GetModbusMqttBridge()->MQTTtoModbus(XdrvMailbox.data))
   {
     case 0:
       //Success 
@@ -2360,5 +2356,31 @@ void CmndMQTTBridge(void){
     default:
       MqttPublishPayload("stat/dev/test/RESULT","{\"mqttbridge\":\"Error Unexpected RC\"}");
       break;
-  } 
+  }
+}
+
+/**
+ * @brief MQTT to Modbus Configuration Command
+ * 
+ */
+void CmndConfMQTTBridge(void){
+  switch (GetModbusMqttBridge()->ModbusConfigCmd(XdrvMailbox.data))
+  {
+    case 0:
+      //Success 
+      ResponseCmndDone();
+      break;
+    case 1:
+      MqttPublishPayload("stat/dev/test/RESULT","{\"mqttbridgeconf \":\"Error No valid Data\"}");
+      break;
+    case 2:
+      MqttPublishPayload("stat/dev/test/RESULT","{\"mqttbridgeconf \":\"Error invalid Baud Index\"}");
+      break;
+    case 3:
+      MqttPublishPayload("stat/dev/test/RESULT","{\"mqttbridgeconf \":\"Error invalid Config Index\"}");
+      break;
+    default:
+      MqttPublishPayload("stat/dev/test/RESULT","{\"mqttbridgeconf \":\"Error unexpected RC\"}");
+      break;
+  }
 }

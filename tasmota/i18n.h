@@ -407,6 +407,7 @@
 #define D_CMND_FILEDOWNLOAD "FileDownload"
 
 #define D_CMND_MQTTBRIDGE "mqttbridge"
+#define D_CMND_MQTTBRIDGECONF "mqttbridgeconf"
 
 // Commands xdrv_01_webserver.ino
 #define D_CMND_WEBSERVER "Webserver"

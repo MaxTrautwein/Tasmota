@@ -554,7 +554,7 @@ void Scheduler(void) {
     Every250mSeconds();
     XdrvCall(FUNC_EVERY_250_MSECOND);
     XsnsCall(FUNC_EVERY_250_MSECOND);
-    ModbusToMQTT();
+    GetModbusMqttBridge()->ModbusToMQTT();
   }
 
   static uint32_t state_second = 0;                // State second timer
