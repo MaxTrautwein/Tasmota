@@ -39,7 +39,7 @@ int ModbusMqttBridge::GetKeyValue(int tokenCnt, jsmntok_t Tokens[],const char* k
             char* tOutData = (char*)malloc((len + 1) * sizeof(char));
             strncpy(tOutData, json + Tokens[i + 1].start, len);
             strncpy(tOutData + len, "\0", 1);
-            Outdata =(byte) strtoul(tOutData, &tOutData, 16) ;
+            Outdata =(byte) strtoul(tOutData,NULL, 16) ;
             free(tOutData);
         }
     }
@@ -69,7 +69,7 @@ int ModbusMqttBridge::GetKeyValue(int tokenCnt, jsmntok_t Tokens[], const char* 
                 char* OutData = (char*)malloc((4 + 1) * sizeof(char));
                 strncpy(OutData, json + g->start, g->len);
                 strncpy(OutData + g->len, "\0", 1);
-                Return[j] = strtoul(OutData, &OutData, 16);
+                Return[j] = strtoul(OutData, NULL, 16);
                 free(OutData);
             }
         }
@@ -120,7 +120,7 @@ byte ModbusMqttBridge::ModbusRx(uint8_t& address,uint8_t& function,uint8_t data[
     //While the theoretical max size is 256 Byte the maximum supported by TasmotaModbus is 255 Byte
     byte InputBuff[255];
     ec = modBusBridgeInstance->ReceiveBuffer(InputBuff,255);
-    byte cnt= modBusBridgeInstance->ReceiveCount();
+    byte cnt= modBusBridgeInstance->ReceiveCount();   
     if (ec == 0 && cnt >= 3){
       memcpy(&address,InputBuff,sizeof(byte));
       memcpy(&function,InputBuff + 1,sizeof(byte));
@@ -221,7 +221,8 @@ byte ModbusMqttBridge::ModbusConfigCmd(const char* json){
   }
 
   if (Updates){
-    //There dos not seem to be a command to close the Modbus
+    //Close the Modbus Connection
+    delete( modBusBridgeInstance);
     ModbusActive = false;
   }
   if (matches){
