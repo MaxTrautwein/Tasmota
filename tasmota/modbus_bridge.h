@@ -26,6 +26,13 @@ class ModbusMqttBridge{
         bool ModbusActive = false;
         const int SerialModes[6] = {SERIAL_8N1,SERIAL_8N2,SERIAL_8E1,SERIAL_8E2,SERIAL_8O1,SERIAL_8O2};
         const long SerialBauds[6] = {1200,2400,4800,9600,14400,19200};
+
+        //If True a Request may only be sent after a response has been recived
+        bool StrictResponseMode = true;
+
+        //Init to true to allow initial Request
+        bool GotResponse = true;
+        uint16_t lastCommand = 0;
 };
 
 ModbusMqttBridge* GetModbusMqttBridge();

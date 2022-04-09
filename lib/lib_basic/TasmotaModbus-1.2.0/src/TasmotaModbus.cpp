@@ -72,7 +72,7 @@ void TasmotaModbus::Send(uint8_t device_address, uint8_t function_code, uint16_t
   flush();
   write(frame, sizeof(frame));
 }
-void TasmotaModbus::Send(uint8_t device_address, uint8_t function_code, uint8_t data[])
+void TasmotaModbus::Send(uint8_t device_address, uint8_t function_code, uint8_t data[], uint16_t &crc)
 {
     uint8_t frame[4+sizeof(data)];
 
@@ -82,7 +82,7 @@ void TasmotaModbus::Send(uint8_t device_address, uint8_t function_code, uint8_t 
     frame[1] = function_code;
     std::copy(data , data + sizeof(data), frame + 2);
     
-    uint16_t crc = CalculateCRC(frame, 2 + sizeof(data));
+    crc = CalculateCRC(frame, 2 + sizeof(data));
     frame[sizeof(frame) - 2] = (uint8_t)(crc);
     frame[sizeof(frame) - 1] = (uint8_t)(crc >> 8);
 

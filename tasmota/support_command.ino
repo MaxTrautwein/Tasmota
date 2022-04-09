@@ -2352,7 +2352,10 @@ void CmndMQTTBridge(void){
       //Missing Data Error
       MqttPublishPayload("stat/dev/test/RESULT","{\"mqttbridge\":\"Error Missing Data\"}");
       break;
-    
+    case 3:
+      //Strict Response Mode Error
+      MqttPublishPayload("stat/dev/test/RESULT","{\"mqttbridge\":\"Error Awaiting Strict Response\"}");
+      break;
     default:
       MqttPublishPayload("stat/dev/test/RESULT","{\"mqttbridge\":\"Error Unexpected RC\"}");
       break;
@@ -2378,6 +2381,9 @@ void CmndConfMQTTBridge(void){
       break;
     case 3:
       MqttPublishPayload("stat/dev/test/RESULT","{\"mqttbridgeconf \":\"Error invalid Config Index\"}");
+      break;
+    case 4:
+      MqttPublishPayload("stat/dev/test/RESULT","{\"mqttbridgeconf \":\"Error invalid Strict Value\"}");
       break;
     default:
       MqttPublishPayload("stat/dev/test/RESULT","{\"mqttbridgeconf \":\"Error unexpected RC\"}");

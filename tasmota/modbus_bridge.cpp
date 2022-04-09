@@ -126,10 +126,6 @@ byte ModbusMqttBridge::ModbusRx(uint8_t& address,uint8_t& function,uint8_t data[
       memcpy(&function,InputBuff + 1,sizeof(byte));
       memcpy(data,InputBuff +2 ,sizeof(byte)* (cnt-2 -crcSub));
       status = cnt - crcSub;
-    }else{
-      char jdata[70] = "";
-      sprintf(jdata, "ERROR - ModbusRx  ec: %u ; cnt: %u", ec,cnt);
-      MqttPublishPayload("tasmota/modbusbridge/rx",jdata);
     }
   }
   //Status Holds the number of bytes read
@@ -147,18 +143,19 @@ void ModbusMqttBridge::ModbusToMQTT(){
   byte data[ModbusMaxDataLen];
   uint8_t errorCode;
   byte rxcnt = ModbusRx(address,function,data,errorCode);
+  char jdata[RxJsonBuffSize] = "";
+  char jdat[RxJsonBuffSize - 50] = "";
   if (rxcnt > 0)
   {
-    char jdata[RxJsonBuffSize] = "";
-    char jdat[RxJsonBuffSize - 50] = "";
     for (int i = 0; i < rxcnt - 2; i++) {
         sprintf(jdat, "%s\"0x%02X\"", jdat, data[i]);
         if (i + 1 < rxcnt - 2) strcat(jdat, ",");
     }
-    sprintf(jdata, "{\"Address\": \"0x%02X\",\"Function\": \"0x%02X\",\"Status\":\"%u\",\"Data\": [%s]}", address, function, errorCode,jdat);
-    
-    MqttPublishPayload("tasmota/modbusbridge/rx",jdata);
   }
+  GotResponse = true; 
+  sprintf(jdata, "{\"Address\": \"0x%02X\",\"Function\": \"0x%02X\",\"Status\":\"%u\",\"Data\": [%s],\"LastRequest\":\"0x%04X\"}", address, function, errorCode,jdat,lastCommand);
+
+  MqttPublishPayload("tasmota/modbusbridge/rx",jdata);
 }
 
 /**
@@ -182,16 +179,22 @@ void ModbusMqttBridge::ModbusToMQTT(){
  *  (4)  SERIAL_8O1
  *  (5)  SERIAL_8O2
  * 
+ * "Strict":
+ * (0) Disable Strict Mode
+ * (1) Enable Strict Mode
+ * 
  * @param json JSON msg
  * @return byte
  * 0 = Pass
  * 1 = No valid Data
  * 2 = invalid Baud Index
  * 3 = invalid Config Index
+ * 4 = invalid Strict Value
  */
 byte ModbusMqttBridge::ModbusConfigCmd(const char* json){
   byte BaudIndex = 0;
   byte ConfigIndex = 0;
+  byte StrictModeValue = 0;
   jsmn_parser p;
   jsmntok_t t[20]; 
   byte matches = 0;
@@ -217,6 +220,19 @@ byte ModbusMqttBridge::ModbusConfigCmd(const char* json){
       ModbusConf = SerialModes[ConfigIndex];
     }else{
       return 3;
+    }
+  }
+  if(GetKeyValue(r, t, "Strict",json,StrictModeValue)> 0) {
+    matches += 4;
+    if (StrictModeValue == 0){
+      StrictResponseMode = false;
+      Updates++;
+    }else if (StrictModeValue == 1){
+      StrictResponseMode = true;
+      GotResponse = true;
+      Updates++;
+    }else{
+      return 4;
     }
   }
 
@@ -246,6 +262,8 @@ byte ModbusMqttBridge::ModbusConfigCmd(const char* json){
  * @return byte 
  * 0 = Pass
  * 1 = Init Error
+ * 2 = Invalid Request
+ * 3 = StrictMode Blocked
  */
 byte ModbusMqttBridge::MQTTtoModbus(const char* json){
   jsmn_parser p;
@@ -266,12 +284,17 @@ byte ModbusMqttBridge::MQTTtoModbus(const char* json){
   if (rc_Status == 2 && datalen > 0)
   {
     byte datar[datalen];
+    uint16_t crc = 0;
     memcpy(datar,data,sizeof(byte)*datalen);
     
     if (!modbus_bridgeInit()){
       return 1;
     }
-    modBusBridgeInstance->Send(address,function,datar);
+    if (StrictResponseMode && GotResponse == false) return 3;
+    modBusBridgeInstance->Send(address,function,datar,crc);
+    //Save the Last Command
+    lastCommand = crc;
+    GotResponse = false;
     return 0;
   }
   return 2;
